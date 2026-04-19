@@ -1,6 +1,7 @@
 package com.ecommerce.config;
 
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -8,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 public class LLMConfig {
 
     @Bean
-    public ChatClient.Builder chatClientBuilder(ChatClient.Builder builder) {
-        return builder;
+    public ChatClient chatClient(ChatModel chatModel) {
+        return ChatClient.create(chatModel);
     }
 }

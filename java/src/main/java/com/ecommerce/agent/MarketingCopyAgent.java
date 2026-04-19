@@ -6,6 +6,7 @@ import com.ecommerce.model.UserProfile;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -33,9 +34,10 @@ public class MarketingCopyAgent extends BaseAgent {
             "最好", "第一", "国家级", "全球首", "绝对", "100%", "永久", "万能"
     );
 
-    public MarketingCopyAgent(ChatClient.Builder chatClientBuilder) {
+    @Autowired
+    public MarketingCopyAgent(ChatClient chatClient) {
         super("marketing_copy", 10.0, 2);
-        this.chatClient = chatClientBuilder.build();
+        this.chatClient = chatClient;
     }
 
     @Override

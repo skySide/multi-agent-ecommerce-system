@@ -1,4 +1,4 @@
-package com.ecommerce.config;
+package com.ecommerce.controller;
 
 import com.ecommerce.model.RecommendationRequest;
 import com.ecommerce.model.RecommendationResponse;

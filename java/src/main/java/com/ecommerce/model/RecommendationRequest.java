@@ -13,8 +13,10 @@ import java.util.Map;
 @AllArgsConstructor
 public class RecommendationRequest {
     private String userId;
+
     @Builder.Default
     private String scene = "homepage";
+
     @Builder.Default
     private int numItems = 10;
     private Map<String, Object> context;

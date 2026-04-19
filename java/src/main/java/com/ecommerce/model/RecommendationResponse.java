@@ -15,12 +15,19 @@ import java.util.Map;
 @AllArgsConstructor
 public class RecommendationResponse {
     private String requestId;
+
     private String userId;
+
     private List<Product> products;
+
     private List<Map<String, String>> marketingCopies;
+
     private String experimentGroup;
+
     private Map<String, AgentResult> agentResults;
+
     private double totalLatencyMs;
+
     @Builder.Default
     private Instant timestamp = Instant.now();
 }
