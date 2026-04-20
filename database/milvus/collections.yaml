@@ -1,0 +1,71 @@
+# Milvus Collection 配置文件
+# 用于初始化向量数据库的 Collection 和索引
+
+# 商品向量 Collection
+product_vectors:
+  description: "商品向量集合，用于相似商品召回"
+  fields:
+    - name: product_id
+      type: VARCHAR
+      max_length: 32
+      is_primary: true
+      description: "商品ID"
+    
+    - name: embedding
+      type: FLOAT_VECTOR
+      dim: 768
+      description: "商品Embedding向量"
+    
+    - name: category_id
+      type: VARCHAR
+      max_length: 32
+      description: "类目ID"
+    
+    - name: price
+      type: FLOAT
+      description: "商品价格"
+    
+    - name: sales_count
+      type: INT32
+      description: "销量"
+    
+    - name: status
+      type: INT8
+      description: "状态: 0-下架, 1-上架"
+  
+  index:
+    - field: embedding
+      type: IVF_FLAT
+      metric_type: COSINE
+      params:
+        nlist: 128
+  
+  consistency_level: Bounded
+
+# 用户向量 Collection
+user_vectors:
+  description: "用户向量集合，用于个性化推荐"
+  fields:
+    - name: user_id
+      type: VARCHAR
+      max_length: 32
+      is_primary: true
+      description: "用户ID"
+    
+    - name: embedding
+      type: FLOAT_VECTOR
+      dim: 768
+      description: "用户Embedding向量"
+    
+    - name: update_time
+      type: INT64
+      description: "更新时间戳"
+  
+  index:
+    - field: embedding
+      type: IVF_FLAT
+      metric_type: COSINE
+      params:
+        nlist: 128
+  
+  consistency_level: Bounded
