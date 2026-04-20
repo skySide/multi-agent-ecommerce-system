@@ -118,8 +118,14 @@ public class SystemBootstrap implements CommandLineRunner {
             milvusService.initUserCollection();
 
             log.info("Milvus 向量数据库初始化完成");
+        } catch (io.grpc.StatusRuntimeException e) {
+            if (e.getStatus().getCode() == io.grpc.Status.Code.UNAVAILABLE) {
+                log.warn("Milvus 服务不可用 (Connection refused)，跳过向量数据库初始化。请启动 Milvus 后重启应用。");
+            } else {
+                log.error("Milvus 初始化失败: {}", e.getMessage());
+            }
         } catch (Exception e) {
-            log.error("Milvus 初始化失败", e);
+            log.error("Milvus 初始化失败: {}", e.getMessage());
         }
     }
 }

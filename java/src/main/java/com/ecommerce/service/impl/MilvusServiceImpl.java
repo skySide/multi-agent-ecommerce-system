@@ -33,8 +33,16 @@ public class MilvusServiceImpl implements MilvusService {
 
     private final MilvusServiceClient milvusClient;
 
+    private boolean isMilvusAvailable() {
+        return milvusClient != null;
+    }
+
     @Override
     public void initProductCollection() {
+        if (!isMilvusAvailable()) {
+            log.warn("Milvus 不可用，跳过商品向量 Collection 初始化");
+            return;
+        }
         try {
             // 定义字段
             FieldType productIdField = FieldType.newBuilder()
@@ -106,6 +114,10 @@ public class MilvusServiceImpl implements MilvusService {
 
     @Override
     public void initUserCollection() {
+        if (!isMilvusAvailable()) {
+            log.warn("Milvus 不可用，跳过用户向量 Collection 初始化");
+            return;
+        }
         try {
             FieldType userIdField = FieldType.newBuilder()
                     .withName("user_id")
@@ -169,6 +181,10 @@ public class MilvusServiceImpl implements MilvusService {
                                       List<String> categoryIds,
                                       List<Float> prices,
                                       List<Integer> salesCounts) {
+        if (!isMilvusAvailable()) {
+            log.warn("Milvus 不可用，跳过商品向量插入");
+            return;
+        }
         try {
             List<InsertParam.Field> fields = new ArrayList<>();
             fields.add(new InsertParam.Field("product_id", productIds));
@@ -191,6 +207,10 @@ public class MilvusServiceImpl implements MilvusService {
 
     @Override
     public List<String> searchSimilarProducts(List<Float> queryVector, int topK) {
+        if (!isMilvusAvailable()) {
+            log.warn("Milvus 不可用，返回空结果");
+            return new ArrayList<>();
+        }
         try {
             SearchParam searchParam = SearchParam.newBuilder()
                     .withCollectionName(PRODUCT_COLLECTION)
@@ -220,6 +240,10 @@ public class MilvusServiceImpl implements MilvusService {
 
     @Override
     public List<String> searchSimilarUsers(List<Float> userVector, int topK) {
+        if (!isMilvusAvailable()) {
+            log.warn("Milvus 不可用，返回空结果");
+            return new ArrayList<>();
+        }
         try {
             SearchParam searchParam = SearchParam.newBuilder()
                     .withCollectionName(USER_COLLECTION)
