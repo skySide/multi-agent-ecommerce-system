@@ -12,7 +12,6 @@ spring:
       embedding:
         options:
           model: text-embedding-3-small
-    # Spring AI Milvus 向量数据库配置
     # 云端 Milvus 配置（无Docker、无本地安装）
 #    vectorstore:
 #      milvus:
