@@ -12,18 +12,23 @@ spring:
       embedding:
         options:
           model: text-embedding-3-small
-          dimensions: 768
     # Spring AI Milvus 向量数据库配置
-    vectorstore:
-      milvus:
-        host: localhost
-        port: 19530
-        collection-name: product_vectors
-        database-name: default
-        index-type: IVF_FLAT
-        metric-type: COSINE
-        dimension: 768
-        initialize-schema: true  # 由 Spring AI 自动初始化 Collection
+    # 云端 Milvus 配置（无Docker、无本地安装）
+#    vectorstore:
+#      milvus:
+#        # 【修正2】必须加端口443！Zilliz Serverless 强制要求
+#        uri: https://in03-ea09ee49096dcfa.serverless.aws-eu-central-1.cloud.zilliz.com:443
+#        # 【修正3】你的token是完整的，保留
+#        token: 1dc458bdd958b6b6b8a761ccc832bfb70ee196aa67c6e54084cd1e885384a9cd0a1340db1ce49f39528c7fd11aface204ccf9bbc
+#        collection-name: product_vectors
+#        database-name: default
+#        index-type: IVF_FLAT
+#        metric-type: COSINE
+#        # 【修正1】维度必须和Embedding模型一致！
+#        dimension: 1536
+#        initialize-schema: true
+#        # 显式指定gRPC，兼容Zilliz Serverless
+#        client-type: GRPC
   datasource:
     url: jdbc:mysql://localhost:3306/ecommerce?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8
     username: root
