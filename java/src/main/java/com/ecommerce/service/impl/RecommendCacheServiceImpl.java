@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ecommerce.entity.RecommendCache;
 import com.ecommerce.mapper.RecommendCacheMapper;
 import com.ecommerce.service.RecommendCacheService;
-import lombok.RequiredArgsConstructor;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -16,10 +16,10 @@ import java.util.List;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class RecommendCacheServiceImpl extends ServiceImpl<RecommendCacheMapper, RecommendCache> implements RecommendCacheService {
 
-    private final RecommendCacheMapper recommendCacheMapper;
+    @Resource
+    private RecommendCacheMapper recommendCacheMapper;
 
     @Override
     public RecommendCache getValidByCacheKey(String cacheKey) {

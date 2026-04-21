@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ecommerce.entity.UserProfile;
 import com.ecommerce.mapper.UserProfileMapper;
 import com.ecommerce.service.UserProfileService;
-import lombok.RequiredArgsConstructor;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -13,10 +13,10 @@ import org.springframework.stereotype.Service;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class UserProfileServiceImpl extends ServiceImpl<UserProfileMapper, UserProfile> implements UserProfileService {
 
-    private final UserProfileMapper userProfileMapper;
+    @Resource
+    private UserProfileMapper userProfileMapper;
 
     @Override
     public UserProfile getByUserId(String userId) {

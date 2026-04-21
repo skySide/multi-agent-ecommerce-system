@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ecommerce.entity.UserRealtimeFeatures;
 import com.ecommerce.mapper.UserRealtimeFeaturesMapper;
 import com.ecommerce.service.UserRealtimeFeaturesService;
-import lombok.RequiredArgsConstructor;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -15,10 +15,10 @@ import java.time.LocalDateTime;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class UserRealtimeFeaturesServiceImpl extends ServiceImpl<UserRealtimeFeaturesMapper, UserRealtimeFeatures> implements UserRealtimeFeaturesService {
 
-    private final UserRealtimeFeaturesMapper userRealtimeFeaturesMapper;
+    @Resource
+    private UserRealtimeFeaturesMapper userRealtimeFeaturesMapper;
 
     @Override
     public UserRealtimeFeatures getByUserId(String userId) {

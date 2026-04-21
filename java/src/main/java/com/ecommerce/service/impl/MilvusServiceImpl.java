@@ -1,273 +1,140 @@
 package com.ecommerce.service.impl;
 
 import com.ecommerce.service.MilvusService;
-import io.milvus.client.MilvusServiceClient;
-import io.milvus.grpc.DataType;
-import io.milvus.grpc.SearchResults;
-import io.milvus.param.IndexType;
-import io.milvus.param.MetricType;
-import io.milvus.param.R;
-import io.milvus.param.RpcStatus;
-import io.milvus.param.collection.CreateCollectionParam;
-import io.milvus.param.collection.FieldType;
-import io.milvus.param.collection.LoadCollectionParam;
-import io.milvus.param.dml.InsertParam;
-import io.milvus.param.dml.SearchParam;
-import io.milvus.param.index.CreateIndexParam;
-import io.milvus.response.SearchResultsWrapper;
-import lombok.RequiredArgsConstructor;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.document.Document;
+import org.springframework.ai.vectorstore.SearchRequest;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Milvus 向量数据库服务实现类
+ * 完全基于 Spring AI VectorStore 抽象，不依赖 Milvus SDK
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class MilvusServiceImpl implements MilvusService {
 
-    private final MilvusServiceClient milvusClient;
-
-    private boolean isMilvusAvailable() {
-        return milvusClient != null;
-    }
+    @Resource
+    private VectorStore vectorStore;
 
     @Override
-    public void initProductCollection() {
-        if (!isMilvusAvailable()) {
-            log.warn("Milvus 不可用，跳过商品向量 Collection 初始化");
+    public void addProductDocuments(List<Document> documents) {
+        if (vectorStore == null) {
+            log.warn("MilvusServiceImpl.addProductDocuments VectorStore不可用，跳过添加商品文档");
             return;
         }
         try {
-            // 定义字段
-            FieldType productIdField = FieldType.newBuilder()
-                    .withName("product_id")
-                    .withDataType(DataType.VarChar)
-                    .withMaxLength(32)
-                    .withPrimaryKey(true)
-                    .withAutoID(false)
-                    .build();
-
-            FieldType embeddingField = FieldType.newBuilder()
-                    .withName("embedding")
-                    .withDataType(DataType.FloatVector)
-                    .withDimension(VECTOR_DIM)
-                    .build();
-
-            FieldType categoryIdField = FieldType.newBuilder()
-                    .withName("category_id")
-                    .withDataType(DataType.VarChar)
-                    .withMaxLength(32)
-                    .build();
-
-            FieldType priceField = FieldType.newBuilder()
-                    .withName("price")
-                    .withDataType(DataType.Float)
-                    .build();
-
-            FieldType salesCountField = FieldType.newBuilder()
-                    .withName("sales_count")
-                    .withDataType(DataType.Int32)
-                    .build();
-
-            FieldType statusField = FieldType.newBuilder()
-                    .withName("status")
-                    .withDataType(DataType.Int8)
-                    .build();
-
-            // 创建 Collection
-            CreateCollectionParam createParam = CreateCollectionParam.newBuilder()
-                    .withCollectionName(PRODUCT_COLLECTION)
-                    .withDescription("商品向量集合")
-                    .withShardsNum(2)
-                    .addFieldType(productIdField)
-                    .addFieldType(embeddingField)
-                    .addFieldType(categoryIdField)
-                    .addFieldType(priceField)
-                    .addFieldType(salesCountField)
-                    .addFieldType(statusField)
-                    .build();
-
-            R<RpcStatus> response = milvusClient.createCollection(createParam);
-            if (response.getStatus() == R.Status.Success.getCode()) {
-                log.info("创建商品向量 Collection 成功");
-
-                // 创建向量索引
-                createIndex(PRODUCT_COLLECTION, "embedding");
-
-                // 加载 Collection
-                milvusClient.loadCollection(LoadCollectionParam.newBuilder()
-                        .withCollectionName(PRODUCT_COLLECTION)
-                        .build());
-            } else {
-                log.warn("创建商品向量 Collection 失败: {}", response.getMessage());
-            }
+            vectorStore.add(documents);
+            log.info("MilvusServiceImpl.addProductDocuments 添加 {} 条商品文档到向量库", documents.size());
         } catch (Exception e) {
-            log.error("初始化商品向量 Collection 异常", e);
+            log.error("MilvusServiceImpl.addProductDocuments 添加商品文档失败", e);
         }
     }
 
     @Override
-    public void initUserCollection() {
-        if (!isMilvusAvailable()) {
-            log.warn("Milvus 不可用，跳过用户向量 Collection 初始化");
+    public void addUserDocuments(List<Document> documents) {
+        if (vectorStore == null) {
+            log.warn("MilvusServiceImpl.addUserDocuments VectorStore不可用，跳过添加用户文档");
             return;
         }
         try {
-            FieldType userIdField = FieldType.newBuilder()
-                    .withName("user_id")
-                    .withDataType(DataType.VarChar)
-                    .withMaxLength(32)
-                    .withPrimaryKey(true)
-                    .withAutoID(false)
-                    .build();
-
-            FieldType embeddingField = FieldType.newBuilder()
-                    .withName("embedding")
-                    .withDataType(DataType.FloatVector)
-                    .withDimension(VECTOR_DIM)
-                    .build();
-
-            FieldType updateTimeField = FieldType.newBuilder()
-                    .withName("update_time")
-                    .withDataType(DataType.Int64)
-                    .build();
-
-            CreateCollectionParam createParam = CreateCollectionParam.newBuilder()
-                    .withCollectionName(USER_COLLECTION)
-                    .withDescription("用户向量集合")
-                    .withShardsNum(2)
-                    .addFieldType(userIdField)
-                    .addFieldType(embeddingField)
-                    .addFieldType(updateTimeField)
-                    .build();
-
-            R<RpcStatus> response = milvusClient.createCollection(createParam);
-            if (response.getStatus() == R.Status.Success.getCode()) {
-                log.info("创建用户向量 Collection 成功");
-                createIndex(USER_COLLECTION, "embedding");
-                milvusClient.loadCollection(LoadCollectionParam.newBuilder()
-                        .withCollectionName(USER_COLLECTION)
-                        .build());
-            }
+            vectorStore.add(documents);
+            log.info("MilvusServiceImpl.addUserDocuments 添加 {} 条用户文档到向量库", documents.size());
         } catch (Exception e) {
-            log.error("初始化用户向量 Collection 异常", e);
+            log.error("MilvusServiceImpl.addUserDocuments 添加用户文档失败", e);
+        }
+    }
+
+    @Override
+    public List<Document> searchSimilarProducts(String query, int topK) {
+        if (vectorStore == null) {
+            log.warn("MilvusServiceImpl.searchSimilarProducts VectorStore不可用，返回空结果");
+            return new ArrayList<>();
+        }
+        try {
+            SearchRequest request = SearchRequest.builder()
+                    .query(query)
+                    .topK(topK)
+                    .build();
+            return vectorStore.similaritySearch(request);
+        } catch (Exception e) {
+            log.error("MilvusServiceImpl.searchSimilarProducts 搜索相似商品失败", e);
+            return new ArrayList<>();
+        }
+    }
+
+    @Override
+    public List<Document> searchSimilarProducts(String query, int topK, Map<String, Object> filters) {
+        if (vectorStore == null) {
+            log.warn("MilvusServiceImpl.searchSimilarProducts VectorStore不可用，返回空结果");
+            return new ArrayList<>();
+        }
+        try {
+            String filterExpression = buildFilterExpression(filters);
+            SearchRequest request = SearchRequest.builder()
+                    .query(query)
+                    .topK(topK)
+                    .filterExpression(filterExpression)
+                    .build();
+            return vectorStore.similaritySearch(request);
+        } catch (Exception e) {
+            log.error("MilvusServiceImpl.searchSimilarProducts 搜索相似商品带过滤失败", e);
+            return new ArrayList<>();
+        }
+    }
+
+    @Override
+    public void deleteProductDocuments(List<String> productIds) {
+        if (vectorStore == null) {
+            log.warn("MilvusServiceImpl.deleteProductDocuments VectorStore不可用，跳过删除商品文档");
+            return;
+        }
+        try {
+            vectorStore.delete(productIds);
+            log.info("MilvusServiceImpl.deleteProductDocuments 删除 {} 条商品文档", productIds.size());
+        } catch (Exception e) {
+            log.error("MilvusServiceImpl.deleteProductDocuments 删除商品文档失败", e);
+        }
+    }
+
+    @Override
+    public void deleteUserDocuments(List<String> userIds) {
+        if (vectorStore == null) {
+            log.warn("MilvusServiceImpl.deleteUserDocuments VectorStore不可用，跳过删除用户文档");
+            return;
+        }
+        try {
+            vectorStore.delete(userIds);
+            log.info("MilvusServiceImpl.deleteUserDocuments 删除 {} 条用户文档", userIds.size());
+        } catch (Exception e) {
+            log.error("MilvusServiceImpl.deleteUserDocuments 删除用户文档失败", e);
         }
     }
 
     /**
-     * 创建向量索引
+     * 构建过滤表达式
      */
-    private void createIndex(String collectionName, String fieldName) {
-        CreateIndexParam indexParam = CreateIndexParam.newBuilder()
-                .withCollectionName(collectionName)
-                .withFieldName(fieldName)
-                .withIndexType(IndexType.IVF_FLAT)
-                .withMetricType(MetricType.COSINE)
-                .withExtraParam("{\"nlist\":128}")
-                .build();
-
-        milvusClient.createIndex(indexParam);
-    }
-
-    @Override
-    public void insertProductVectors(List<String> productIds,
-                                      List<List<Float>> embeddings,
-                                      List<String> categoryIds,
-                                      List<Float> prices,
-                                      List<Integer> salesCounts) {
-        if (!isMilvusAvailable()) {
-            log.warn("Milvus 不可用，跳过商品向量插入");
-            return;
+    private String buildFilterExpression(Map<String, Object> filters) {
+        if (filters == null || filters.isEmpty()) {
+            return null;
         }
-        try {
-            List<InsertParam.Field> fields = new ArrayList<>();
-            fields.add(new InsertParam.Field("product_id", productIds));
-            fields.add(new InsertParam.Field("embedding", embeddings));
-            fields.add(new InsertParam.Field("category_id", categoryIds));
-            fields.add(new InsertParam.Field("price", prices));
-            fields.add(new InsertParam.Field("sales_count", salesCounts));
-
-            InsertParam insertParam = InsertParam.newBuilder()
-                    .withCollectionName(PRODUCT_COLLECTION)
-                    .withFields(fields)
-                    .build();
-
-            milvusClient.insert(insertParam);
-            log.info("插入 {} 条商品向量", productIds.size());
-        } catch (Exception e) {
-            log.error("插入商品向量失败", e);
-        }
-    }
-
-    @Override
-    public List<String> searchSimilarProducts(List<Float> queryVector, int topK) {
-        if (!isMilvusAvailable()) {
-            log.warn("Milvus 不可用，返回空结果");
-            return new ArrayList<>();
-        }
-        try {
-            SearchParam searchParam = SearchParam.newBuilder()
-                    .withCollectionName(PRODUCT_COLLECTION)
-                    .withVectors(Arrays.asList(queryVector))
-                    .withVectorFieldName("embedding")
-                    .withMetricType(MetricType.COSINE)
-                    .withTopK(topK)
-                    .withParams("{\"nprobe\":16}")
-                    .addOutField("product_id")
-                    .build();
-
-            R<SearchResults> response = milvusClient.search(searchParam);
-            SearchResultsWrapper wrapper = new SearchResultsWrapper(response.getData().getResults());
-
-            List<String> productIds = new ArrayList<>();
-            for (int i = 0; i < wrapper.getRowRecords().size(); i++) {
-                String productId = (String) wrapper.getFieldData("product_id", i).get(0);
-                productIds.add(productId);
-            }
-
-            return productIds;
-        } catch (Exception e) {
-            log.error("搜索相似商品失败", e);
-            return new ArrayList<>();
-        }
-    }
-
-    @Override
-    public List<String> searchSimilarUsers(List<Float> userVector, int topK) {
-        if (!isMilvusAvailable()) {
-            log.warn("Milvus 不可用，返回空结果");
-            return new ArrayList<>();
-        }
-        try {
-            SearchParam searchParam = SearchParam.newBuilder()
-                    .withCollectionName(USER_COLLECTION)
-                    .withVectors(Arrays.asList(userVector))
-                    .withVectorFieldName("embedding")
-                    .withMetricType(MetricType.COSINE)
-                    .withTopK(topK)
-                    .withParams("{\"nprobe\":16}")
-                    .addOutField("user_id")
-                    .build();
-
-            R<SearchResults> response = milvusClient.search(searchParam);
-            SearchResultsWrapper wrapper = new SearchResultsWrapper(response.getData().getResults());
-
-            List<String> userIds = new ArrayList<>();
-            for (int i = 0; i < wrapper.getRowRecords().size(); i++) {
-                String userId = (String) wrapper.getFieldData("user_id", i).get(0);
-                userIds.add(userId);
-            }
-
-            return userIds;
-        } catch (Exception e) {
-            log.error("搜索相似用户失败", e);
-            return new ArrayList<>();
-        }
+        return filters.entrySet().stream()
+                .map(entry -> {
+                    String key = entry.getKey();
+                    Object value = entry.getValue();
+                    if (value instanceof String) {
+                        return key + " == \"" + value + "\"";
+                    } else {
+                        return key + " == " + value;
+                    }
+                })
+                .collect(Collectors.joining(" && "));
     }
 }

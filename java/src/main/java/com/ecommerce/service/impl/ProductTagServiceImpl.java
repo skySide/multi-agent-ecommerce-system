@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ecommerce.entity.ProductTag;
 import com.ecommerce.mapper.ProductTagMapper;
 import com.ecommerce.service.ProductTagService;
-import lombok.RequiredArgsConstructor;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -15,10 +15,10 @@ import java.util.List;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ProductTagServiceImpl extends ServiceImpl<ProductTagMapper, ProductTag> implements ProductTagService {
 
-    private final ProductTagMapper productTagMapper;
+    @Resource
+    private ProductTagMapper productTagMapper;
 
     @Override
     public List<ProductTag> listByProductId(String productId, Integer isDeleted) {

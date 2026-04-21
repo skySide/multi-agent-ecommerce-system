@@ -1,9 +1,13 @@
 package com.ecommerce.service;
 
+import org.springframework.ai.document.Document;
+
 import java.util.List;
+import java.util.Map;
 
 /**
  * Milvus 向量数据库服务接口
+ * 基于 Spring AI VectorStore 抽象，完全屏蔽底层 Milvus SDK
  */
 public interface MilvusService {
 
@@ -15,31 +19,32 @@ public interface MilvusService {
     int VECTOR_DIM = 768;
 
     /**
-     * 初始化商品向量 Collection
+     * 添加商品文档到向量库
      */
-    void initProductCollection();
+    void addProductDocuments(List<Document> documents);
 
     /**
-     * 初始化用户向量 Collection
+     * 添加用户文档到向量库
      */
-    void initUserCollection();
+    void addUserDocuments(List<Document> documents);
 
     /**
-     * 插入商品向量
+     * 搜索相似商品（基于向量）
      */
-    void insertProductVectors(List<String> productIds,
-                               List<List<Float>> embeddings,
-                               List<String> categoryIds,
-                               List<Float> prices,
-                               List<Integer> salesCounts);
+    List<Document> searchSimilarProducts(String query, int topK);
 
     /**
-     * 搜索相似商品
+     * 搜索相似商品（基于向量，带过滤条件）
      */
-    List<String> searchSimilarProducts(List<Float> queryVector, int topK);
+    List<Document> searchSimilarProducts(String query, int topK, Map<String, Object> filters);
 
     /**
-     * 搜索相似用户（用于 UserCF）
+     * 删除商品文档
      */
-    List<String> searchSimilarUsers(List<Float> userVector, int topK);
+    void deleteProductDocuments(List<String> productIds);
+
+    /**
+     * 删除用户文档
+     */
+    void deleteUserDocuments(List<String> userIds);
 }

@@ -64,10 +64,10 @@
             <artifactId>mysql-connector-j</artifactId>
             <scope>runtime</scope>
         </dependency>
-        <!-- Spring AI Milvus Vector Store -->
+        <!-- Spring AI Milvus Vector Store 实现 -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-milvus-store</artifactId>
+            <artifactId>spring-ai-milvus-store-spring-boot-starter</artifactId>
         </dependency>
 
         <!-- 工具类 -->

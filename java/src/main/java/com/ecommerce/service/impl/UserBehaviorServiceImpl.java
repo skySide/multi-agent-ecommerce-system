@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ecommerce.entity.UserBehavior;
 import com.ecommerce.mapper.UserBehaviorMapper;
 import com.ecommerce.service.UserBehaviorService;
-import lombok.RequiredArgsConstructor;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -15,10 +15,10 @@ import java.util.List;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class UserBehaviorServiceImpl extends ServiceImpl<UserBehaviorMapper, UserBehavior> implements UserBehaviorService {
 
-    private final UserBehaviorMapper userBehaviorMapper;
+    @Resource
+    private UserBehaviorMapper userBehaviorMapper;
 
     @Override
     public List<UserBehavior> listRecentByUserId(String userId, int limit) {

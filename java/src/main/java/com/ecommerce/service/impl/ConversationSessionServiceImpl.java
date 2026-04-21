@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ecommerce.entity.ConversationSession;
 import com.ecommerce.mapper.ConversationSessionMapper;
 import com.ecommerce.service.ConversationSessionService;
-import lombok.RequiredArgsConstructor;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -16,10 +16,10 @@ import java.util.UUID;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ConversationSessionServiceImpl extends ServiceImpl<ConversationSessionMapper, ConversationSession> implements ConversationSessionService {
 
-    private final ConversationSessionMapper conversationSessionMapper;
+    @Resource
+    private ConversationSessionMapper conversationSessionMapper;
 
     @Override
     public ConversationSession getBySessionId(String sessionId) {

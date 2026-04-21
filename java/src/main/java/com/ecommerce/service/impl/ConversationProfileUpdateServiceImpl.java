@@ -4,7 +4,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.ecommerce.entity.ConversationProfileUpdate;
 import com.ecommerce.mapper.ConversationProfileUpdateMapper;
 import com.ecommerce.service.ConversationProfileUpdateService;
-import lombok.RequiredArgsConstructor;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -16,10 +16,10 @@ import java.util.List;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ConversationProfileUpdateServiceImpl extends ServiceImpl<ConversationProfileUpdateMapper, ConversationProfileUpdate> implements ConversationProfileUpdateService {
 
-    private final ConversationProfileUpdateMapper conversationProfileUpdateMapper;
+    @Resource
+    private ConversationProfileUpdateMapper conversationProfileUpdateMapper;
 
     @Override
     public List<ConversationProfileUpdate> listByUserId(String userId) {
