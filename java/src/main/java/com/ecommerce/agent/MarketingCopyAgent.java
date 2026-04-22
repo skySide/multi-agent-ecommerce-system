@@ -1,25 +1,30 @@
 package com.ecommerce.agent;
 
+import com.ecommerce.entity.Product;
 import com.ecommerce.model.AgentResult;
-import com.ecommerce.model.Product;
 import com.ecommerce.model.UserProfile;
+import com.ecommerce.service.ProductService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.Resource;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
  * 营销文案Agent — Prompt模板引擎 + 个性化生成 + 广告法合规校验
+ * 接入真实商品数据
  */
 @Component
 public class MarketingCopyAgent extends BaseAgent {
 
-    private final ChatClient chatClient;
+    @Resource
+    private ChatClient chatClient;
+    @Resource
+    private ProductService productService;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final Map<String, String> TEMPLATES = Map.of(
@@ -34,19 +39,29 @@ public class MarketingCopyAgent extends BaseAgent {
             "最好", "第一", "国家级", "全球首", "绝对", "100%", "永久", "万能"
     );
 
-    @Autowired
-    public MarketingCopyAgent(ChatClient chatClient) {
+    public MarketingCopyAgent() {
         super("marketing_copy", 10.0, 2);
-        this.chatClient = chatClient;
     }
 
     @Override
     @SuppressWarnings("unchecked")
     protected AgentResult execute(Map<String, Object> params) throws Exception {
         UserProfile profile = (UserProfile) params.get("userProfile");
-        List<Product> products = (List<Product>) params.getOrDefault("products", List.of());
+        List<String> productIds = extractProductIds(params);
 
+        log.info("MarketingCopyAgent.execute 开始生成营销文案，商品数={} 用户分群={}",
+                productIds.size(), profile != null ? profile.getSegments() : "unknown");
+
+        if (productIds.isEmpty()) {
+            log.info("MarketingCopyAgent.execute 商品列表为空，跳过文案生成");
+            return AgentResult.builder().agentName(name).success(true)
+                    .data(Map.of("copies", List.of())).confidence(1.0).build();
+        }
+
+        // 从数据库查询真实商品信息
+        List<Product> products = productService.listByProductIds(productIds);
         if (products.isEmpty()) {
+            log.warn("MarketingCopyAgent.execute 未找到商品信息");
             return AgentResult.builder().agentName(name).success(true)
                     .data(Map.of("copies", List.of())).confidence(1.0).build();
         }
@@ -56,7 +71,10 @@ public class MarketingCopyAgent extends BaseAgent {
                 + "\n每个商品生成一条文案(30-50字)。输出JSON数组: [{\"product_id\":\"xxx\",\"copy\":\"文案\"}]";
 
         String productInfo = products.stream()
-                .map(p -> "ID:" + p.getProductId() + " " + p.getName() + " ¥" + p.getPrice() + " " + p.getTags())
+                .map(p -> String.format("ID:%s %s %s ¥%.0f 品牌:%s",
+                        p.getProductId(), p.getProductName(), p.getCategoryName(),
+                        p.getPrice() != null ? p.getPrice().doubleValue() : 0,
+                        p.getBrand()))
                 .collect(Collectors.joining("\n"));
 
         String response = chatClient.prompt()
@@ -68,9 +86,15 @@ public class MarketingCopyAgent extends BaseAgent {
         List<Map<String, String>> copies = parseCopies(response);
         copies = copies.stream().map(this::complianceCheck).collect(Collectors.toList());
 
+        // 确保每个商品都有文案（兜底）
+        copies = ensureAllProductsHaveCopy(products, copies);
+
         Map<String, Object> data = new HashMap<>();
         data.put("copies", copies);
         data.put("template_used", templateKey);
+        data.put("product_count", products.size());
+
+        log.info("MarketingCopyAgent.execute 文案生成完成，共 {} 条", copies.size());
 
         return AgentResult.builder()
                 .agentName(name)
@@ -78,6 +102,59 @@ public class MarketingCopyAgent extends BaseAgent {
                 .data(data)
                 .confidence(0.9)
                 .build();
+    }
+
+    /**
+     * 从参数中提取商品ID列表
+     */
+    @SuppressWarnings("unchecked")
+    private List<String> extractProductIds(Map<String, Object> params) {
+        // 方式1: 直接传入 productId 列表
+        List<String> ids = (List<String>) params.get("productIds");
+        if (ids != null && !ids.isEmpty()) {
+            return ids;
+        }
+
+        // 方式2: 传入 model.Product 列表
+        List<com.ecommerce.model.Product> modelProducts =
+                (List<com.ecommerce.model.Product>) params.get("products");
+        if (modelProducts != null && !modelProducts.isEmpty()) {
+            return modelProducts.stream()
+                    .map(com.ecommerce.model.Product::getProductId)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+        }
+
+        return List.of();
+    }
+
+    /**
+     * 确保每个商品都有文案，没有则生成默认文案
+     */
+    private List<Map<String, String>> ensureAllProductsHaveCopy(List<Product> products, List<Map<String, String>> copies) {
+        Map<String, String> copyMap = copies.stream()
+                .collect(Collectors.toMap(
+                        c -> c.getOrDefault("product_id", ""),
+                        c -> c.getOrDefault("copy", ""),
+                        (a, b) -> a
+                ));
+
+        List<Map<String, String>> result = new ArrayList<>();
+        for (Product product : products) {
+            String pid = product.getProductId();
+            String copy = copyMap.get(pid);
+            if (copy == null || copy.isEmpty()) {
+                copy = String.format("%s %s，%s出品，仅售¥%.0f，品质保证！",
+                        product.getCategoryName(), product.getProductName(),
+                        product.getBrand(),
+                        product.getPrice() != null ? product.getPrice().doubleValue() : 0);
+            }
+            Map<String, String> item = new HashMap<>();
+            item.put("product_id", pid);
+            item.put("copy", copy);
+            result.add(item);
+        }
+        return result;
     }
 
     private String selectTemplate(UserProfile profile) {
@@ -98,7 +175,7 @@ public class MarketingCopyAgent extends BaseAgent {
             }
             return objectMapper.readValue(cleaned, new TypeReference<>() {});
         } catch (Exception e) {
-            log.warn("Failed to parse copies: {}", e.getMessage());
+            log.warn("MarketingCopyAgent.parseCopies 解析失败: {}", e.getMessage());
             return List.of();
         }
     }

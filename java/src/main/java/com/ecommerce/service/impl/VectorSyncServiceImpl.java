@@ -1,9 +1,9 @@
 package com.ecommerce.service.impl;
 
 import com.ecommerce.entity.Product;
-import com.ecommerce.service.MilvusService;
 import com.ecommerce.service.ProductService;
 import com.ecommerce.service.VectorSyncService;
+import com.ecommerce.service.VectorStoreService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
@@ -23,7 +23,7 @@ import java.util.Map;
 public class VectorSyncServiceImpl implements VectorSyncService {
 
     @Resource
-    private MilvusService milvusService;
+    private VectorStoreService vectorStoreService;
     @Resource
     private ProductService productService;
 
@@ -44,7 +44,7 @@ public class VectorSyncServiceImpl implements VectorSyncService {
             List<Document> documents = batch.stream()
                     .map(this::convertProductToDocument)
                     .toList();
-            milvusService.addProductDocuments(documents);
+            vectorStoreService.addProductDocuments(documents);
             log.info("VectorSyncServiceImpl.syncAllProducts 已同步 {}/{} 条商品", Math.min(i + batchSize, products.size()), products.size());
         }
 
@@ -60,7 +60,7 @@ public class VectorSyncServiceImpl implements VectorSyncService {
         }
 
         Document document = convertProductToDocument(product);
-        milvusService.addProductDocuments(Collections.singletonList(document));
+        vectorStoreService.addProductDocuments(Collections.singletonList(document));
         log.info("VectorSyncServiceImpl.syncProduct 同步商品到向量库: {}", productId);
     }
 
@@ -70,13 +70,13 @@ public class VectorSyncServiceImpl implements VectorSyncService {
         List<Document> documents = products.stream()
                 .map(this::convertProductToDocument)
                 .toList();
-        milvusService.addProductDocuments(documents);
+        vectorStoreService.addProductDocuments(documents);
         log.info("VectorSyncServiceImpl.syncProducts 批量同步 {} 条商品到向量库", documents.size());
     }
 
     @Override
     public void removeProductFromVector(String productId) {
-        milvusService.deleteProductDocuments(Collections.singletonList(productId));
+        vectorStoreService.deleteProductDocuments(Collections.singletonList(productId));
         log.info("VectorSyncServiceImpl.removeProductFromVector 从向量库删除商品: {}", productId);
     }
 

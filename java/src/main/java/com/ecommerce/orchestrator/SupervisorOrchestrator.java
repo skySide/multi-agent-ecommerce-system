@@ -3,6 +3,7 @@ package com.ecommerce.orchestrator;
 import com.ecommerce.agent.*;
 import com.ecommerce.model.*;
 import com.ecommerce.service.ABTestService;
+import jakarta.annotation.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -29,31 +30,23 @@ public class SupervisorOrchestrator {
 
     private static final Logger log = LoggerFactory.getLogger(SupervisorOrchestrator.class);
 
-    private final UserProfileAgent userProfileAgent;
-    private final ProductRecAgent productRecAgent;
-    private final MarketingCopyAgent marketingCopyAgent;
-    private final InventoryAgent inventoryAgent;
-    private final ABTestService abTestService;
-
-    public SupervisorOrchestrator(
-            UserProfileAgent userProfileAgent,
-            ProductRecAgent productRecAgent,
-            MarketingCopyAgent marketingCopyAgent,
-            InventoryAgent inventoryAgent,
-            ABTestService abTestService) {
-        this.userProfileAgent = userProfileAgent;
-        this.productRecAgent = productRecAgent;
-        this.marketingCopyAgent = marketingCopyAgent;
-        this.inventoryAgent = inventoryAgent;
-        this.abTestService = abTestService;
-    }
+    @Resource
+    private UserProfileAgent userProfileAgent;
+    @Resource
+    private ProductRecAgent productRecAgent;
+    @Resource
+    private MarketingCopyAgent marketingCopyAgent;
+    @Resource
+    private InventoryAgent inventoryAgent;
+    @Resource
+    private ABTestService abTestService;
 
     public RecommendationResponse recommend(RecommendationRequest request) {
         String requestId = UUID.randomUUID().toString();
         long start = System.nanoTime();
         Map<String, AgentResult> agentResults = new HashMap<>();
 
-        log.info("[Supervisor] start request={} user={}", requestId, request.getUserId());
+        log.info("SupervisorOrchestrator.recommend start request={} user={}", requestId, request.getUserId());
 
         String experimentGroup = abTestService.assign(request.getUserId()).getOrDefault("group", "control").toString();
 
@@ -61,7 +54,7 @@ public class SupervisorOrchestrator {
         CompletableFuture<AgentResult> profileFuture = userProfileAgent.runAsync(
                 Map.of("userId", request.getUserId()));
         CompletableFuture<AgentResult> recFuture = productRecAgent.runAsync(
-                Map.of("numItems", request.getNumItems() * 2));
+                Map.of("userId", request.getUserId(), "numItems", request.getNumItems() * 2));
 
         AgentResult profileResult = profileFuture.join();
         AgentResult recResult = recFuture.join();
@@ -74,12 +67,22 @@ public class SupervisorOrchestrator {
         List<Product> rawProducts = recResult.getData() != null
                 ? (List<Product>) recResult.getData().get("products") : List.of();
 
+        log.info("SupervisorOrchestrator.recommend Phase1完成 画像={} 召回{}条商品",
+                profile != null ? profile.getSegments() : "null", rawProducts.size());
+
         // Phase 2: parallel — rerank + inventory check
         CompletableFuture<AgentResult> rerankFuture = productRecAgent.runAsync(
-                Map.of("userProfile", profile != null ? profile : new UserProfile(),
-                       "numItems", request.getNumItems()));
+                Map.of("userId", request.getUserId(),
+                        "userProfile", profile != null ? profile : new UserProfile(),
+                        "numItems", request.getNumItems()));
+
+        // 提取商品ID传给库存Agent
+        List<String> productIds = rawProducts.stream()
+                .map(Product::getProductId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
         CompletableFuture<AgentResult> inventoryFuture = inventoryAgent.runAsync(
-                Map.of("products", rawProducts));
+                Map.of("productIds", productIds));
 
         AgentResult rerankResult = rerankFuture.join();
         AgentResult inventoryResult = inventoryFuture.join();
@@ -93,19 +96,26 @@ public class SupervisorOrchestrator {
         List<String> availableIds = inventoryResult.getData() != null
                 ? (List<String>) inventoryResult.getData().get("available_products") : List.of();
 
+        log.info("SupervisorOrchestrator.recommend Phase2完成 精排{}条 可售{}条",
+                rankedProducts.size(), availableIds.size());
+
         Set<String> availSet = new HashSet<>(availableIds);
         List<Product> finalProducts = rankedProducts.stream()
                 .filter(p -> availSet.contains(p.getProductId()))
                 .limit(request.getNumItems())
                 .collect(Collectors.toList());
         if (finalProducts.isEmpty()) {
+            log.warn("SupervisorOrchestrator.recommend 库存过滤后为空，使用精排结果兜底");
             finalProducts = rankedProducts.stream().limit(request.getNumItems()).collect(Collectors.toList());
         }
 
         // Phase 3: marketing copy
+        List<String> finalProductIds = finalProducts.stream()
+                .map(Product::getProductId)
+                .collect(Collectors.toList());
         AgentResult copyResult = marketingCopyAgent.runAsync(
                 Map.of("userProfile", profile != null ? profile : new UserProfile(),
-                       "products", finalProducts))
+                        "productIds", finalProductIds))
                 .join();
         agentResults.put("marketing_copy", copyResult);
 
@@ -114,7 +124,8 @@ public class SupervisorOrchestrator {
                 ? (List<Map<String, String>>) copyResult.getData().get("copies") : List.of();
 
         double totalLatency = (System.nanoTime() - start) / 1_000_000.0;
-        log.info("[Supervisor] complete request={} latency={:.1f}ms products={}", requestId, totalLatency, finalProducts.size());
+        log.info("SupervisorOrchestrator.recommend complete request={} latency={:.1f}ms products={} experiment={}",
+                requestId, totalLatency, finalProducts.size(), experimentGroup);
 
         return RecommendationResponse.builder()
                 .requestId(requestId)

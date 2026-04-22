@@ -7,14 +7,17 @@ import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+/**
+ * 向量存储配置
+ * 使用 SimpleVectorStore（内存向量库）
+ */
 @Slf4j
 @Configuration
 public class VectorStoreConfiguration {
 
     @Bean
     public VectorStore vectorStore(EmbeddingModel embeddingModel) {
-        // Spring AI 1.0.0-M5 的 SimpleVectorStore 构建方式
+        log.info("VectorStoreConfiguration.vectorStore 使用 SimpleVectorStore（内存向量库）");
         return new SimpleVectorStore(embeddingModel);
-
     }
 }

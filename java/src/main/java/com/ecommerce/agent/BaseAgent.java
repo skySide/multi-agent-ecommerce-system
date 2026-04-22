@@ -42,12 +42,12 @@ public abstract class BaseAgent {
                     AgentResult result = execute(params);
                     double latency = (System.nanoTime() - start) / 1_000_000.0;
                     result.setLatencyMs(latency);
-                    log.info("[{}] success in {:.1f}ms", name, latency);
+                    log.info("BaseAgent.runAsync {}.execute success in {:.1f}ms", name, latency);
                     return result;
                 } catch (Exception e) {
                     lastError = e;
                     attempt++;
-                    log.warn("[{}] attempt {} failed: {}", name, attempt, e.getMessage());
+                    log.warn("BaseAgent.runAsync {}.execute attempt {} failed: {}", name, attempt, e.getMessage());
                     if (attempt < maxRetries) {
                         try {
                             Thread.sleep((long) (500 * Math.pow(2, attempt - 1)));

@@ -6,10 +6,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Milvus 向量数据库服务接口
- * 基于 Spring AI VectorStore 抽象，完全屏蔽底层 Milvus SDK
+ * 向量存储服务接口
+ * 基于 Spring AI VectorStore 抽象
  */
-public interface MilvusService {
+public interface VectorStoreService {
 
     // Collection 名称
     String PRODUCT_COLLECTION = "product_vectors";
