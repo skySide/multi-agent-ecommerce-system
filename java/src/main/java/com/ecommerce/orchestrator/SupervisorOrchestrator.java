@@ -70,11 +70,28 @@ public class SupervisorOrchestrator {
         log.info("SupervisorOrchestrator.recommend Phase1完成 画像={} 召回{}条商品",
                 profile != null ? profile.getSegments() : "null", rawProducts.size());
 
-        // Phase 2: parallel — rerank + inventory check
-        CompletableFuture<AgentResult> rerankFuture = productRecAgent.runAsync(
-                Map.of("userId", request.getUserId(),
-                        "userProfile", profile != null ? profile : new UserProfile(),
-                        "numItems", request.getNumItems()));
+        // Phase 2: rerank + inventory check
+        // 若画像缺失或信息不足，复用 Phase1 结果，避免重复检索。
+        CompletableFuture<AgentResult> rerankFuture;
+        if (hasUsableProfile(profile)) {
+            rerankFuture = productRecAgent.runAsync(
+                    Map.of("userId", request.getUserId(),
+                            "userProfile", profile,
+                            "numItems", request.getNumItems()));
+        } else {
+            rerankFuture = CompletableFuture.completedFuture(
+                    AgentResult.builder()
+                            .agentName("product_rec")
+                            .success(true)
+                            .data(Map.of(
+                                    "products", rawProducts.stream().limit(request.getNumItems()).collect(Collectors.toList()),
+                                    "rerank_skipped", true,
+                                    "reason", "profile_missing_or_not_informative"
+                            ))
+                            .confidence(0.8)
+                            .build()
+            );
+        }
 
         // 提取商品ID传给库存Agent
         List<String> productIds = rawProducts.stream()
@@ -136,5 +153,19 @@ public class SupervisorOrchestrator {
                 .agentResults(agentResults)
                 .totalLatencyMs(totalLatency)
                 .build();
+    }
+
+    private boolean hasUsableProfile(UserProfile profile) {
+        if (profile == null) {
+            return false;
+        }
+        boolean hasSegments = profile.getSegments() != null && !profile.getSegments().isEmpty();
+        boolean hasCategoryPreference = profile.getPreferredCategories() != null
+                && !profile.getPreferredCategories().isEmpty();
+        boolean hasPriceRange = profile.getPriceRange() != null && profile.getPriceRange().length >= 2;
+        boolean hasBehaviorSignal = profile.getRecentViews() != null && !profile.getRecentViews().isEmpty();
+        hasBehaviorSignal = hasBehaviorSignal
+                || (profile.getRecentPurchases() != null && !profile.getRecentPurchases().isEmpty());
+        return hasSegments || hasCategoryPreference || hasPriceRange || hasBehaviorSignal;
     }
 }
