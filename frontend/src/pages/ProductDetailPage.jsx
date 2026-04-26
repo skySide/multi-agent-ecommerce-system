@@ -34,7 +34,7 @@ function ProductDetailPage() {
 
   const handleAddToCart = async () => {
     try {
-      await api.recordBehavior(product.productId, 'cart')
+      await api.recordBehavior(userId, 'cart', product.productId)
       message.success('已添加到购物车')
     } catch (error) {
       message.success('已添加到购物车')
@@ -43,7 +43,7 @@ function ProductDetailPage() {
 
   const handleBuyNow = async () => {
     try {
-      await api.recordBehavior(product.productId, 'click')
+      await api.recordBehavior(userId, 'click', product.productId)
       message.success('购买成功')
     } catch (error) {
       message.success('购买成功')
@@ -52,7 +52,7 @@ function ProductDetailPage() {
 
   const handleRecordView = async () => {
     try {
-      await api.recordBehavior(id, 'view')
+      await api.recordBehavior(userId, 'view', id)
     } catch (error) {
       console.error('记录浏览失败:', error)
     }
@@ -145,7 +145,7 @@ function ProductDetailPage() {
                 size="large"
                 onClick={async () => {
                   try {
-                    await api.recordBehavior(product.productId, 'favorite')
+                    await api.recordBehavior(userId, 'favorite', product.productId)
                     message.success('已收藏')
                   } catch (error) {
                     message.success('已收藏')

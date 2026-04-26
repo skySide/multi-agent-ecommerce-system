@@ -20,12 +20,14 @@ function HomePage() {
     setLoading(true)
     try {
       const response = await api.recommend(userId, 'homepage', 6)
-      if (response.data && response.data.products) {
-        setRecommendations(response.data.products)
+      // api.js 已解包 Result.data，response 就是 RecommendationResponse
+      if (response && response.products && response.products.length > 0) {
+        setRecommendations(response.products)
       } else {
         const hotResponse = await api.getHotProducts(6)
-        if (hotResponse.data) {
-          setRecommendations(hotResponse.data)
+        // hot 接口返回 Result<List<Product>>，解包后是数组
+        if (hotResponse && Array.isArray(hotResponse) && hotResponse.length > 0) {
+          setRecommendations(hotResponse)
         }
       }
     } catch (error) {
@@ -33,8 +35,8 @@ function HomePage() {
       message.warning('获取推荐失败，显示热门商品')
       try {
         const hotResponse = await api.getHotProducts(6)
-        if (hotResponse.data) {
-          setRecommendations(hotResponse.data)
+        if (hotResponse && Array.isArray(hotResponse) && hotResponse.length > 0) {
+          setRecommendations(hotResponse)
         }
       } catch (hotError) {
         console.error('获取热门商品失败:', hotError)

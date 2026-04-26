@@ -3,31 +3,19 @@ spring:
     name: multi-agent-ecommerce
   ai:
     openai:
-      api-key: sk-0Vx0aPGNlkinE0HBB7JEJr9MdlgGvYXOwWxi5pF3D0tj1d77
-      base-url: https://api.chatanywhere.tech
+      # 硅基流动配置（兼容 OpenAI API 格式）
+      # 【重要】base-url 不要带 /v1！Spring AI 内部已硬编码 /v1/embeddings 路径
+      # 如果带 /v1，实际请求会变成 https://.../v1/v1/embeddings → 404
+      api-key: ${SILICONFLOW_API_KEY:}
+      base-url: ${SILICONFLOW_BASE_URL:https://api.siliconflow.cn}
       chat:
         options:
-          model: gpt-5
+          model: ${SILICONFLOW_CHAT_MODEL:deepseek-ai/DeepSeek-V3}
           temperature: 0.7
       embedding:
         options:
-          model: text-embedding-3-small
-    # 云端 Milvus 配置（无Docker、无本地安装）
-#    vectorstore:
-#      milvus:
-#        # 【修正2】必须加端口443！Zilliz Serverless 强制要求
-#        uri: https://in03-ea09ee49096dcfa.serverless.aws-eu-central-1.cloud.zilliz.com:443
-#        # 【修正3】你的token是完整的，保留
-#        token: 1dc458bdd958b6b6b8a761ccc832bfb70ee196aa67c6e54084cd1e885384a9cd0a1340db1ce49f39528c7fd11aface204ccf9bbc
-#        collection-name: product_vectors
-#        database-name: default
-#        index-type: IVF_FLAT
-#        metric-type: COSINE
-#        # 【修正1】维度必须和Embedding模型一致！
-#        dimension: 1536
-#        initialize-schema: true
-#        # 显式指定gRPC，兼容Zilliz Serverless
-#        client-type: GRPC
+          model: ${SILICONFLOW_EMBEDDING_MODEL:BAAI/bge-large-zh-v1.5}
+          dimensions: 768
   datasource:
     url: jdbc:mysql://localhost:3306/ecommerce?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8
     username: root
@@ -53,6 +41,23 @@ mybatis-plus:
     db-config:
       id-type: auto
   mapper-locations: classpath*:/mapper/**/*.xml
+
+    # 云端 Milvus 配置（无Docker、无本地安装）
+#    vectorstore:
+#      milvus:
+#        # 【修正2】必须加端口443！Zilliz Serverless 强制要求
+#        uri: https://in03-ea09ee49096dcfa.serverless.aws-eu-central-1.cloud.zilliz.com:443
+#        # 【修正3】你的token是完整的，保留
+#        token: 1dc458bdd958b6b6b8a761ccc832bfb70ee196aa67c6e54084cd1e885384a9cd0a1340db1ce49f39528c7fd11aface204ccf9bbc
+#        collection-name: product_vectors
+#        database-name: default
+#        index-type: IVF_FLAT
+#        metric-type: COSINE
+#        # 【修正1】维度必须和Embedding模型一致！
+#        dimension: 1536
+#        initialize-schema: true
+#        # 显式指定gRPC，兼容Zilliz Serverless
+#        client-type: GRPC
 
 # Embedding 服务配置
 embedding:

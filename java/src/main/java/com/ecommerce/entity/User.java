@@ -31,6 +31,8 @@ public class User {
 
     private String avatarUrl;
 
+    private String password;
+
     private LocalDateTime registerTime;
 
     @TableLogic

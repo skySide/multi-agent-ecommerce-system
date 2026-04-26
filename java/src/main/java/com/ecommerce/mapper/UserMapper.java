@@ -29,4 +29,10 @@ public interface UserMapper extends BaseMapper<User> {
      */
     @Select("SELECT COUNT(*) FROM user WHERE user_id = #{userId} AND is_deleted = 0")
     boolean existsByUserId(@Param("userId") String userId);
+
+    /**
+     * 根据用户名查询
+     */
+    @Select("SELECT * FROM user WHERE username = #{username} AND is_deleted = 0")
+    User findByUsername(@Param("username") String username);
 }

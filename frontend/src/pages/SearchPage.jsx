@@ -27,9 +27,17 @@ function SearchPage() {
 
     setLoading(true)
     try {
+      // 记录搜索行为
+      try {
+        await api.recordBehavior(userId, 'search', null, keyword)
+      } catch (e) {
+        console.error('记录搜索行为失败:', e)
+      }
+
       const response = await api.searchProducts(keyword, 20)
-      if (response.data) {
-        setSearchResults(response.data)
+      // api.js 已解包 Result.data，response 直接是数组
+      if (response && Array.isArray(response)) {
+        setSearchResults(response)
       } else {
         setSearchResults([])
       }

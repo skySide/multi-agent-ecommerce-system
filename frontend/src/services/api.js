@@ -3,9 +3,11 @@ const API_BASE_URL = '/api'
 class ApiService {
   async request(url, options = {}) {
     try {
+      const token = localStorage.getItem('token')
       const response = await fetch(url, {
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
           ...options.headers,
         },
         ...options,

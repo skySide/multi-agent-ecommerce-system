@@ -101,6 +101,11 @@ public class DocumentVectorServiceImpl implements DocumentVectorService {
             for (int i = 0; i < documents.size(); i += batchSize) {
                 List<Document> batch = documents.subList(i, Math.min(i + batchSize, documents.size()));
                 vectorStore.add(batch);
+                // 【硅基流动免费账户 RPM 限制保护】每批间隔 20 秒
+                if (i + batchSize < documents.size()) {
+                    log.info("DocumentVectorServiceImpl.addDocumentsToKnowledgeBase 等待20秒避免RPM限制...");
+                    Thread.sleep(20000);
+                }
             }
         } catch (Exception e) {
             log.error("DocumentVectorServiceImpl.addDocumentsToKnowledgeBase 添加文档到知识库失败", e);

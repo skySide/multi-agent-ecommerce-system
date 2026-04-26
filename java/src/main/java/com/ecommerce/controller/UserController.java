@@ -1,10 +1,17 @@
 package com.ecommerce.controller;
 
+import com.ecommerce.common.Result;
+import com.ecommerce.common.enums.ErrorCode;
+import com.ecommerce.dto.LoginRequestDTO;
+import com.ecommerce.dto.UserCreateDTO;
 import com.ecommerce.entity.User;
 import com.ecommerce.entity.UserProfile;
 import com.ecommerce.service.UserProfileService;
 import com.ecommerce.service.UserService;
+import com.ecommerce.vo.UserAuthVO;
+import com.ecommerce.vo.UserVO;
 import jakarta.annotation.Resource;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
@@ -27,27 +34,78 @@ public class UserController {
      * 获取用户信息
      */
     @GetMapping("/{userId}")
-    public User getUser(@PathVariable String userId) {
-        log.info("UserController.getUser userId={}", userId);
-        return userService.getByUserId(userId);
+    public Result<UserVO> getUser(@PathVariable String userId) {
+        log.info("UserController.getUser, userId: {}", userId);
+        User user = userService.getByUserId(userId);
+        if (user == null) {
+            return Result.notFound("用户不存在");
+        }
+        // 转换为VO
+        UserVO userVO = UserVO.builder()
+                .userId(user.getUserId())
+                .username(user.getUsername())
+                .email(user.getEmail())
+                .phone(user.getPhone())
+                .avatarUrl(user.getAvatarUrl())
+                .registerTime(user.getRegisterTime())
+                .build();
+        return Result.success(userVO);
     }
 
     /**
      * 获取用户画像
      */
     @GetMapping("/{userId}/profile")
-    public UserProfile getUserProfile(@PathVariable String userId) {
-        log.info("UserController.getUserProfile userId={}", userId);
-        return userProfileService.getByUserId(userId);
+    public Result<UserProfile> getUserProfile(@PathVariable String userId) {
+        log.info("UserController.getUserProfile, userId: {}", userId);
+        UserProfile profile = userProfileService.getByUserId(userId);
+        if (profile == null) {
+            return Result.notFound("用户画像不存在");
+        }
+        return Result.success(profile);
     }
 
     /**
-     * 创建用户
+     * 用户注册
+     */
+    @PostMapping("/register")
+    public Result<Map<String, String>> register(@RequestBody @Valid UserCreateDTO dto) {
+        log.info("UserController.register, user: {}", dto.getUsername());
+        try {
+            UserAuthVO authVO = userService.register(dto);
+            return Result.success(Map.of(
+                    "userId", authVO.getUserId(),
+                    "token", authVO.getToken(),
+                    "username", authVO.getUsername()
+            ));
+        } catch (RuntimeException e) {
+            return Result.error(ErrorCode.USER_ERROR, e.getMessage());
+        }
+    }
+
+    /**
+     * 用户登录
+     */
+    @PostMapping("/login")
+    public Result<Map<String, String>> login(@RequestBody @Valid LoginRequestDTO dto) {
+        log.info("UserController.login, user: {}", dto.getUsername());
+        try {
+            UserAuthVO authVO = userService.login(dto);
+            return Result.success(Map.of(
+                    "userId", authVO.getUserId(),
+                    "token", authVO.getToken(),
+                    "username", authVO.getUsername()
+            ));
+        } catch (RuntimeException e) {
+            return Result.error(ErrorCode.UNAUTHORIZED, e.getMessage());
+        }
+    }
+
+    /**
+     * 创建用户（兼容旧接口，内部调用注册逻辑）
      */
     @PostMapping
-    public Map<String, Object> createUser(@RequestBody User user) {
-        boolean success = userService.save(user);
-        log.info("UserController.createUser 结果={} userId={}", success, user.getUserId());
-        return Map.of("success", success, "userId", user.getUserId());
+    public Result<Map<String, String>> createUser(@RequestBody @Valid UserCreateDTO dto) {
+        return register(dto);
     }
 }

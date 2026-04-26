@@ -49,10 +49,19 @@ public class SystemBootstrap implements CommandLineRunner {
         }
 
         // 3. 同步商品数据到向量数据库（结构化数据同步）
-        syncProductsToVectorStore();
+        // 【注意】向量服务配置错误时不阻塞主流程启动
+        try {
+            syncProductsToVectorStore();
+        } catch (Exception e) {
+            log.error("SystemBootstrap.run 向量同步失败，继续启动: {}", e.getMessage());
+        }
 
         // 4. 初始化 RAG 知识库文档（文档分块向量化）
-        initKnowledgeBase();
+        try {
+            initKnowledgeBase();
+        } catch (Exception e) {
+            log.error("SystemBootstrap.run 知识库初始化失败，继续启动: {}", e.getMessage());
+        }
 
         log.info("SystemBootstrap.run 系统启动初始化完成");
     }
