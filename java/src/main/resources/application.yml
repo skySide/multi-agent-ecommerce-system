@@ -3,8 +3,8 @@ spring:
     name: multi-agent-ecommerce
   ai:
     openai:
-      api-key: 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
-      base-url: https://integrate.api.nvidia.com/v1
+      api-key: sk-0Vx0aPGNlkinE0HBB7JEJr9MdlgGvYXOwWxi5pF3D0tj1d77
+      base-url: https://api.chatanywhere.tech
       chat:
         options:
           model: gpt-5
@@ -12,10 +12,22 @@ spring:
       embedding:
         options:
           model: text-embedding-3-small
-    siliconflow:
-      api-key: sk-xxx
-      base-url: https://api.siliconflow.cn/v1
-      embedding-model: BAAI/bge-large-zh-v1.5
+    # 云端 Milvus 配置（无Docker、无本地安装）
+#    vectorstore:
+#      milvus:
+#        # 【修正2】必须加端口443！Zilliz Serverless 强制要求
+#        uri: https://in03-ea09ee49096dcfa.serverless.aws-eu-central-1.cloud.zilliz.com:443
+#        # 【修正3】你的token是完整的，保留
+#        token: 1dc458bdd958b6b6b8a761ccc832bfb70ee196aa67c6e54084cd1e885384a9cd0a1340db1ce49f39528c7fd11aface204ccf9bbc
+#        collection-name: product_vectors
+#        database-name: default
+#        index-type: IVF_FLAT
+#        metric-type: COSINE
+#        # 【修正1】维度必须和Embedding模型一致！
+#        dimension: 1536
+#        initialize-schema: true
+#        # 显式指定gRPC，兼容Zilliz Serverless
+#        client-type: GRPC
   datasource:
     url: jdbc:mysql://localhost:3306/ecommerce?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8
     username: root
@@ -33,6 +45,7 @@ spring:
           max-idle: 10
           min-idle: 1
 
+# MyBatis-Plus 配置
 mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
@@ -41,6 +54,7 @@ mybatis-plus:
       id-type: auto
   mapper-locations: classpath*:/mapper/**/*.xml
 
+# Embedding 服务配置
 embedding:
   service:
     url: http://localhost:8000
