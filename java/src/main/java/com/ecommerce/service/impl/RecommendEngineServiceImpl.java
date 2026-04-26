@@ -1,7 +1,6 @@
 package com.ecommerce.service.impl;
 
 import com.ecommerce.entity.Product;
-import com.ecommerce.model.RecommendResult;
 import com.ecommerce.model.UserProfile;
 import com.ecommerce.service.ProductService;
 import com.ecommerce.service.RecommendEngineService;

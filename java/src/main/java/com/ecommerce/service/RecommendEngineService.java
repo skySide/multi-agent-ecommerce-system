@@ -1,7 +1,6 @@
 package com.ecommerce.service;
 
 import com.ecommerce.entity.Product;
-import com.ecommerce.model.RecommendResult;
 import com.ecommerce.model.UserProfile;
 
 import java.util.List;

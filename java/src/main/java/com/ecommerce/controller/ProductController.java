@@ -1,13 +1,19 @@
 package com.ecommerce.controller;
 
+import com.ecommerce.common.Result;
+import com.ecommerce.common.enums.ErrorCode;
+import com.ecommerce.dto.ProductCreateDTO;
 import com.ecommerce.entity.Product;
 import com.ecommerce.service.ProductService;
+import com.ecommerce.vo.ProductVO;
 import jakarta.annotation.Resource;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 商品 Controller
@@ -24,65 +30,140 @@ public class ProductController {
      * 获取商品详情
      */
     @GetMapping("/{productId}")
-    public Product getProduct(@PathVariable String productId) {
-        log.info("ProductController.getProduct productId={}", productId);
-        return productService.getByProductId(productId);
+    public Result<ProductVO> getProduct(@PathVariable String productId) {
+        log.info("ProductController.getProduct, productId: {}", productId);
+        Product product = productService.getByProductId(productId);
+        if (product == null) {
+            return Result.notFound("商品不存在");
+        }
+        // 转换为VO
+        ProductVO productVO = convertToVO(product);
+        return Result.success(productVO);
     }
 
     /**
      * 批量查询商品
      */
     @PostMapping("/batch")
-    public List<Product> getProductsBatch(@RequestBody List<String> productIds) {
-        log.info("ProductController.getProductsBatch 数量={}", productIds.size());
-        return productService.listByProductIds(productIds);
+    public Result<List<ProductVO>> getProductsBatch(@RequestBody List<String> productIds) {
+        log.info("ProductController.getProductsBatch, 数量: {}", productIds.size());
+        List<Product> products = productService.listByProductIds(productIds);
+        // 转换为VO列表
+        List<ProductVO> productVOs = products.stream()
+                .map(this::convertToVO)
+                .collect(Collectors.toList());
+        return Result.success(productVOs);
     }
 
     /**
      * 搜索商品
      */
     @GetMapping("/search")
-    public List<Product> searchProducts(@RequestParam String keyword,
+    public Result<List<ProductVO>> searchProducts(@RequestParam String keyword,
                                          @RequestParam(defaultValue = "10") int limit) {
-        log.info("ProductController.searchProducts 关键词={} 数量={}", keyword, limit);
-        return productService.searchByKeyword(keyword, limit);
+        log.info("ProductController.searchProducts, 关键词: {}, 数量: {}", keyword, limit);
+        List<Product> products = productService.searchByKeyword(keyword, limit);
+        // 转换为VO列表
+        List<ProductVO> productVOs = products.stream()
+                .map(this::convertToVO)
+                .collect(Collectors.toList());
+        return Result.success(productVOs);
     }
 
     /**
      * 获取热门商品
      */
     @GetMapping("/hot")
-    public List<Product> getHotProducts(@RequestParam(defaultValue = "10") int limit) {
-        log.info("ProductController.getHotProducts 数量={}", limit);
-        return productService.listHotProducts(limit);
+    public Result<List<ProductVO>> getHotProducts(@RequestParam(defaultValue = "10") int limit) {
+        log.info("ProductController.getHotProducts, 数量: {}", limit);
+        List<Product> products = productService.listHotProducts(limit);
+        // 转换为VO列表
+        List<ProductVO> productVOs = products.stream()
+                .map(this::convertToVO)
+                .collect(Collectors.toList());
+        return Result.success(productVOs);
     }
 
     /**
      * 获取新品
      */
     @GetMapping("/new")
-    public List<Product> getNewArrivals(@RequestParam(defaultValue = "10") int limit) {
-        log.info("ProductController.getNewArrivals 数量={}", limit);
-        return productService.listNewArrivals(limit);
+    public Result<List<ProductVO>> getNewArrivals(@RequestParam(defaultValue = "10") int limit) {
+        log.info("ProductController.getNewArrivals, 数量: {}", limit);
+        List<Product> products = productService.listNewArrivals(limit);
+        // 转换为VO列表
+        List<ProductVO> productVOs = products.stream()
+                .map(this::convertToVO)
+                .collect(Collectors.toList());
+        return Result.success(productVOs);
     }
 
     /**
      * 按类目查询商品
      */
     @GetMapping("/category/{categoryId}")
-    public List<Product> getByCategory(@PathVariable String categoryId,
+    public Result<List<ProductVO>> getByCategory(@PathVariable String categoryId,
                                         @RequestParam(defaultValue = "10") int limit) {
-        log.info("ProductController.getByCategory 类目={} 数量={}", categoryId, limit);
-        return productService.listByCategoryId(categoryId, 1, 0);
+        log.info("ProductController.getByCategory, 类目: {}, 数量: {}", categoryId, limit);
+        List<Product> products = productService.listByCategoryId(categoryId, 1, 0);
+        // 转换为VO列表
+        List<ProductVO> productVOs = products.stream()
+                .map(this::convertToVO)
+                .collect(Collectors.toList());
+        return Result.success(productVOs);
     }
 
     /**
      * 创建商品
      */
     @PostMapping
-    public Map<String, Object> createProduct(@RequestBody Product product) {
+    public Result<Map<String, String>> createProduct(@RequestBody @Valid ProductCreateDTO dto) {
+        log.info("ProductController.createProduct, 商品名称: {}", dto.getProductName());
+        // 转换为实体
+        Product product = Product.builder()
+                .productId("P" + System.currentTimeMillis())
+                .productName(dto.getProductName())
+                .productDescription(dto.getProductDescription())
+                .price(dto.getPrice())
+                .originalPrice(dto.getOriginalPrice())
+                .stock(dto.getStock())
+                .salesCount(dto.getSalesCount())
+                .rating(dto.getRating())
+                .brand(dto.getBrand())
+                .categoryId(dto.getCategoryId())
+                .categoryName(dto.getCategoryName())
+                .mainImage(dto.getMainImage())
+                .images(dto.getImages() != null ? String.join(",", dto.getImages()) : null)
+                .productStatus(dto.getProductStatus())
+                .build();
+        
         boolean success = productService.save(product);
-        log.info("ProductController.createProduct 结果={} productId={}", success, product.getProductId());
-        return Map.of("success", success, "productId", product.getProductId());
+        log.info("ProductController.createProduct, 结果: {}, productId: {}", success, product.getProductId());
+        if (success) {
+            return Result.success(Map.of("productId", product.getProductId()));
+        }
+        return Result.error(ErrorCode.PRODUCT_ERROR, "创建商品失败");
+    }
+
+    /**
+     * 转换Product为ProductVO
+     */
+    private ProductVO convertToVO(Product product) {
+        return ProductVO.builder()
+                .productId(product.getProductId())
+                .productName(product.getProductName())
+                .productDescription(product.getProductDescription())
+                .price(product.getPrice())
+                .originalPrice(product.getOriginalPrice())
+                .stock(product.getStock() != null ? product.getStock() : 0)
+                .salesCount(product.getSalesCount() != null ? product.getSalesCount() : 0)
+                .rating(product.getRating() != null ? product.getRating() : java.math.BigDecimal.ZERO)
+                .brand(product.getBrand())
+                .categoryId(product.getCategoryId())
+                .categoryName(product.getCategoryName())
+                .mainImage(product.getMainImage())
+                .images(product.getImages() != null ? List.of(product.getImages().split(",")) : null)
+                .productStatus(product.getProductStatus() != null ? product.getProductStatus() : 0)
+                .build();
     }
 }

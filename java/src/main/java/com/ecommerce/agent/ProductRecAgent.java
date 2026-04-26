@@ -2,7 +2,6 @@ package com.ecommerce.agent;
 
 import com.ecommerce.entity.Product;
 import com.ecommerce.model.AgentResult;
-import com.ecommerce.model.RecommendResult;
 import com.ecommerce.model.UserProfile;
 import com.ecommerce.service.ProductService;
 import com.ecommerce.service.RecommendEngineService;
