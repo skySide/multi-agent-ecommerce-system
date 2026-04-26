@@ -18,6 +18,6 @@ public class VectorStoreConfiguration {
     @Bean
     public VectorStore vectorStore(EmbeddingModel embeddingModel) {
         log.info("VectorStoreConfiguration.vectorStore 使用 SimpleVectorStore（内存向量库）");
-        return new SimpleVectorStore(embeddingModel);
+        return SimpleVectorStore.builder(embeddingModel).build();
     }
 }
