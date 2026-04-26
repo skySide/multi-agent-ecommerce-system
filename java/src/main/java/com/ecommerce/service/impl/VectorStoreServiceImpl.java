@@ -129,6 +129,14 @@ public class VectorStoreServiceImpl implements VectorStoreService {
                 .map(entry -> {
                     String key = entry.getKey();
                     Object value = entry.getValue();
+                    if (key.endsWith("_gte")) {
+                        String field = key.substring(0, key.length() - 4);
+                        return field + " >= " + value;
+                    }
+                    if (key.endsWith("_lte")) {
+                        String field = key.substring(0, key.length() - 4);
+                        return field + " <= " + value;
+                    }
                     if (value instanceof String) {
                         return key + " == \"" + value + "\"";
                     } else {
