@@ -17,12 +17,12 @@ public interface UserBehaviorMapper extends BaseMapper<UserBehavior> {
     /**
      * 查询用户最近的行为记录
      */
-    @Select("SELECT * FROM user_behavior WHERE user_id = #{userId} AND is_deleted = 0 ORDER BY create_time DESC LIMIT #{limit}")
-    List<UserBehavior> findRecentByUserId(@Param("userId") String userId, @Param("limit") int limit);
+    @Select("SELECT * FROM user_behavior WHERE user_id = #{userId} AND is_deleted = 0 AND create_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY) ORDER BY create_time DESC LIMIT #{limit}")
+    List<UserBehavior> findRecentByUserId(@Param("userId") String userId, @Param("days") int days, @Param("limit") int limit);
 
     /**
-     * 查询用户的特定行为类型记录
+     * 查询用户的特定行为类型记录（可指定时间范围）
      */
-    @Select("SELECT * FROM user_behavior WHERE user_id = #{userId} AND behavior_type = #{behaviorType} AND is_deleted = 0 ORDER BY create_time DESC LIMIT #{limit}")
-    List<UserBehavior> findByUserIdAndType(@Param("userId") String userId, @Param("behaviorType") String behaviorType, @Param("limit") int limit);
+    @Select("SELECT * FROM user_behavior WHERE user_id = #{userId} AND behavior_type = #{behaviorType} AND is_deleted = 0 AND create_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY) ORDER BY create_time DESC LIMIT #{limit}")
+    List<UserBehavior> findByUserIdAndType(@Param("userId") String userId, @Param("behaviorType") String behaviorType, @Param("days") int days, @Param("limit") int limit);
 }

@@ -1,5 +1,6 @@
 package com.ecommerce.agent;
 
+import com.ecommerce.dto.UserProfileAnalysisDTO;
 import com.ecommerce.entity.UserBehavior;
 import com.ecommerce.entity.UserProfile;
 import com.ecommerce.model.AgentResult;
@@ -8,6 +9,7 @@ import com.ecommerce.service.UserProfileService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -32,11 +34,7 @@ public class UserProfileAgent extends BaseAgent {
 
     private static final String SYSTEM_PROMPT = """
             你是一个电商用户画像分析专家。根据用户的行为数据,分析用户特征并生成画像。
-            输出JSON格式:
-            {"segments":["active"],"preferred_categories":["手机"],"price_range":[0,10000],
-             "rfm_score":{"recency":0.8,"frequency":0.5,"monetary":0.6},
-             "real_time_tags":{"活跃时段":"晚间"}}
-            只输出JSON。""";
+            请严格按照要求的JSON格式输出，不要包含任何其他文字。""";
 
     public UserProfileAgent() {
         super("user_profile", 5.0, 2);
@@ -53,16 +51,18 @@ public class UserProfileAgent extends BaseAgent {
         // 2. 读取已有画像（如果有）
         UserProfile existingProfile = userProfileService.getByUserId(userId);
 
-        // 3. 构建 LLM 分析提示
+        // 3. 构建 LLM 分析提示，使用结构化输出直接映射到DTO
         String behaviorJson = objectMapper.writeValueAsString(behavior);
+        BeanOutputConverter<UserProfileAnalysisDTO> converter = new BeanOutputConverter<>(UserProfileAnalysisDTO.class);
         String response = chatClient.prompt()
-                .system(SYSTEM_PROMPT)
+                .system(SYSTEM_PROMPT + "\n" + converter.getFormat())
                 .user("用户ID: " + userId + "\n历史画像: " + (existingProfile != null ? profileToString(existingProfile) : "无") + "\n行为数据: " + behaviorJson)
                 .call()
                 .content();
 
-        // 4. 解析并构建画像
-        com.ecommerce.model.UserProfile profile = parseProfile(userId, response, behavior);
+        // 4. 解析并构建画像（结构化输出，无需手动parse JSON字符串）
+        UserProfileAnalysisDTO analysis = converter.convert(response);
+        com.ecommerce.model.UserProfile profile = buildProfileFromDto(userId, analysis, behavior);
 
         // 5. 保存画像到数据库
         try {
@@ -156,50 +156,48 @@ public class UserProfileAgent extends BaseAgent {
     }
 
     /**
-     * 解析 LLM 输出，构建 UserProfile 模型
+     * 从结构化DTO构建 UserProfile 模型
      */
-    @SuppressWarnings("unchecked")
-    private com.ecommerce.model.UserProfile parseProfile(String userId, String raw, Map<String, Object> behavior) {
+    private com.ecommerce.model.UserProfile buildProfileFromDto(String userId, UserProfileAnalysisDTO dto, Map<String, Object> behavior) {
+        if (dto == null) {
+            return fallbackProfile(userId, behavior);
+        }
         try {
-            String cleaned = raw.trim();
-            if (cleaned.startsWith("```")) {
-                cleaned = cleaned.substring(cleaned.indexOf('\n') + 1);
-                cleaned = cleaned.substring(0, cleaned.lastIndexOf("```"));
-            }
-            Map<String, Object> data = objectMapper.readValue(cleaned, Map.class);
-
-            List<String> segments = (List<String>) data.getOrDefault("segments", List.of("active"));
-            List<String> categories = (List<String>) data.getOrDefault("preferred_categories", List.of());
-            List<?> priceRaw = (List<?>) data.getOrDefault("price_range", List.of(0, 10000));
-            Map<String, Double> rfm = (Map<String, Double>) data.getOrDefault("rfm_score", Map.of());
-            Map<String, Object> tags = (Map<String, Object>) data.getOrDefault("real_time_tags", Map.of());
+            List<String> segments = dto.getSegments() != null ? dto.getSegments() : List.of("active");
+            List<String> categories = dto.getPreferredCategories() != null ? dto.getPreferredCategories() : List.of();
+            List<Double> priceRange = dto.getPriceRange() != null && dto.getPriceRange().size() >= 2
+                    ? dto.getPriceRange() : List.of(0.0, 10000.0);
 
             // 从行为中提取最近浏览和购买
+            @SuppressWarnings("unchecked")
             List<String> recentViews = (List<String>) behavior.getOrDefault("recent_views", List.of());
+            @SuppressWarnings("unchecked")
             List<String> recentPurchases = (List<String>) behavior.getOrDefault("recent_purchases", List.of());
 
             return com.ecommerce.model.UserProfile.builder()
                     .userId(userId)
                     .segments(segments)
                     .preferredCategories(categories)
-                    .priceRange(new double[]{
-                            ((Number) priceRaw.get(0)).doubleValue(),
-                            priceRaw.size() > 1 ? ((Number) priceRaw.get(1)).doubleValue() : 10000
-                    })
+                    .priceRange(new double[]{priceRange.get(0), priceRange.get(1)})
                     .recentViews(recentViews)
                     .recentPurchases(recentPurchases)
-                    .rfmScore(rfm)
-                    .realTimeTags(tags)
+                    .rfmScore(dto.getRfmScore())
+                    .realTimeTags(dto.getRealTimeTags())
                     .build();
         } catch (Exception e) {
-            log.warn("UserProfileAgent.parseProfile 解析失败 userId={}: {}", userId, e.getMessage());
-            return com.ecommerce.model.UserProfile.builder()
-                    .userId(userId)
-                    .segments(List.of("active"))
-                    .recentViews((List<String>) behavior.getOrDefault("recent_views", List.of()))
-                    .recentPurchases((List<String>) behavior.getOrDefault("recent_purchases", List.of()))
-                    .build();
+            log.warn("UserProfileAgent.buildProfileFromDto 构建失败 userId={}: {}", userId, e.getMessage());
+            return fallbackProfile(userId, behavior);
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private com.ecommerce.model.UserProfile fallbackProfile(String userId, Map<String, Object> behavior) {
+        return com.ecommerce.model.UserProfile.builder()
+                .userId(userId)
+                .segments(List.of("active"))
+                .recentViews((List<String>) behavior.getOrDefault("recent_views", List.of()))
+                .recentPurchases((List<String>) behavior.getOrDefault("recent_purchases", List.of()))
+                .build();
     }
 
     /**

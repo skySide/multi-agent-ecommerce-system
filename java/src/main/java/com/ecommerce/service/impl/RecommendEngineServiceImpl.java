@@ -108,6 +108,9 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
      * 向量召回通道：query构建、metadata过滤、回表并按向量顺序重排。
      * 需要重新排序的目的，是因为查询数据库的数据， 和向量召回的顺序有可能不一样，而向量召回的数据
      * 已经按照相似度进行排序了， 因此需要查询数据库之后，还需要再进行排序
+     *
+     * 之所以要查询数据库，是因为可能我们数据库变更之后，没有那么快同步到向量数据库中，因此
+     * 需要再次查询数据库，从而得到准确的数据，降低幻觉
      */
     @Override
     public List<Product> vectorRecall(String userId, UserProfile profile, int numItems) {

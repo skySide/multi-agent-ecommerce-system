@@ -11,14 +11,28 @@ import java.util.List;
 public interface UserBehaviorService extends IService<UserBehavior> {
 
     /**
-     * 查询用户最近的行为记录
+     * 查询用户最近的行为记录（默认最近30天）
      */
-    List<UserBehavior> listRecentByUserId(String userId, int limit);
+    default List<UserBehavior> listRecentByUserId(String userId, int limit) {
+        return listRecentByUserId(userId, 30, limit);
+    }
 
     /**
-     * 查询用户的特定行为类型记录
+     * 查询用户最近的行为记录（可指定天数）
      */
-    List<UserBehavior> listByUserIdAndType(String userId, String behaviorType, int limit);
+    List<UserBehavior> listRecentByUserId(String userId, int days, int limit);
+
+    /**
+     * 查询用户的特定行为类型记录（默认最近30天）
+     */
+    default List<UserBehavior> listByUserIdAndType(String userId, String behaviorType, int limit) {
+        return listByUserIdAndType(userId, behaviorType, 30, limit);
+    }
+
+    /**
+     * 查询用户的特定行为类型记录（可指定天数）
+     */
+    List<UserBehavior> listByUserIdAndType(String userId, String behaviorType, int days, int limit);
 
     /**
      * 记录用户行为
