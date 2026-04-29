@@ -15,6 +15,7 @@ CREATE TABLE `user` (
     `username` VARCHAR(50) NOT NULL DEFAULT '' COMMENT '用户名',
     `email` VARCHAR(100) DEFAULT '' COMMENT '邮箱',
     `phone` VARCHAR(20) DEFAULT '' COMMENT '手机号',
+    `password` VARCHAR(64) NOT NULL DEFAULT '123456' COMMENT '密码',
     `avatar_url` VARCHAR(255) DEFAULT '' COMMENT '头像URL',
     `register_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '注册时间',
     `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除: 0-否, 1-是',
