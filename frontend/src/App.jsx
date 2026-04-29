@@ -12,14 +12,26 @@ const { Header, Content, Footer } = Layout
 
 function App() {
   const navigate = useNavigate()
-  const token = localStorage.getItem('token')
-  const username = localStorage.getItem('username')
+  const [token, setToken] = React.useState(localStorage.getItem('token'))
+  const [username, setUsername] = React.useState(localStorage.getItem('username'))
+
+  // 监听 storage 变化（登录/登出后刷新状态）
+  React.useEffect(() => {
+    const handler = () => {
+      setToken(localStorage.getItem('token'))
+      setUsername(localStorage.getItem('username'))
+    }
+    window.addEventListener('storage', handler)
+    return () => window.removeEventListener('storage', handler)
+  }, [])
 
   const handleLogout = () => {
     localStorage.removeItem('token')
     localStorage.removeItem('userId')
     localStorage.removeItem('username')
-    window.location.reload()
+    setToken(null)
+    setUsername(null)
+    navigate('/')
   }
 
   return (

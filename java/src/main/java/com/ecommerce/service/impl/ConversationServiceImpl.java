@@ -1,6 +1,7 @@
 package com.ecommerce.service.impl;
 
 import com.ecommerce.entity.ConversationSession;
+import com.ecommerce.entity.UserProfile;
 import com.ecommerce.model.*;
 import com.ecommerce.service.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -8,6 +9,7 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -34,6 +36,9 @@ public class ConversationServiceImpl implements ConversationService {
     private ProductService productService;
     @Resource
     private UserBehaviorService userBehaviorService;
+    @Resource
+    @Lazy
+    private UserProfileService userProfileService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -48,12 +53,18 @@ public class ConversationServiceImpl implements ConversationService {
 
         log.info("ConversationServiceImpl.chat 用户={} 会话={} 消息={}", userId, sessionId, message);
 
-        // 1. 获取或创建会话
+        // 1. 获取或创建会话（校验 sessionId 归属，防止跨用户访问）
         if (sessionId == null || sessionId.isEmpty()) {
             sessionId = createSession(userId);
         }
         ConversationSession session = conversationSessionService.getBySessionId(sessionId);
         if (session == null) {
+            sessionId = createSession(userId);
+            session = conversationSessionService.getBySessionId(sessionId);
+        } else if (!userId.equals(session.getUserId())) {
+            // sessionId 不属于当前用户，拒绝访问，创建新会话
+            log.warn("ConversationServiceImpl.chat 会话归属校验失败: sessionId={} 属于 userId={}, 请求 userId={}",
+                    sessionId, session.getUserId(), userId);
             sessionId = createSession(userId);
             session = conversationSessionService.getBySessionId(sessionId);
         }
@@ -139,22 +150,28 @@ public class ConversationServiceImpl implements ConversationService {
 
     private ConversationResponse handleRecommend(String userId, String sessionId, String message,
                                                   List<String> history, Map<String, Object> entities) {
-        // 构建用户画像（从实体中提取偏好）
-        UserProfile profile = buildProfileFromEntities(userId, entities);
+        // 读取会话记忆（extracted_info），合并跨轮次累积的实体
+        Map<String, Object> mergedEntities = mergeWithSessionMemory(sessionId, entities);
+
+        // 构建用户画像（从合并后实体中提取偏好）
+        UserProfile profile = buildProfileFromEntities(userId, mergedEntities);
+
+        // 注入长期记忆：读取 user_profile 历史偏好
+        String longTermContext = buildLongTermContext(userId);
 
         // 调用推荐引擎
-        int numItems = entities.get("num_items") instanceof Number
-                ? ((Number) entities.get("num_items")).intValue() : 6;
+        int numItems = mergedEntities.get("num_items") instanceof Number
+                ? ((Number) mergedEntities.get("num_items")).intValue() : 6;
         List<com.ecommerce.entity.Product> recProducts = recommendEngineService.recommend(
-                userId, profile, numItems, entities);
+                userId, profile, numItems, mergedEntities);
 
         // 转换为 model.Product
         List<Product> modelProducts = recProducts.stream()
                 .map(this::convertToModel)
                 .collect(Collectors.toList());
 
-        // 生成回复
-        String reply = generateRecommendReply(message, modelProducts, profile);
+        // 生成回复（注入对话历史 + 长期记忆背景）
+        String reply = generateRecommendReply(message, modelProducts, profile, history, longTermContext);
 
         return ConversationResponse.builder()
                 .message(reply)
@@ -180,7 +197,14 @@ public class ConversationServiceImpl implements ConversationService {
                 .map(this::convertToModel)
                 .collect(Collectors.toList());
 
-        String reply = generateProductQueryReply(modelProducts);
+        // 注入对话历史，让回复更连贯
+        String historyText = "";
+        if (!history.isEmpty()) {
+            List<String> recent = history.subList(Math.max(0, history.size() - 4), history.size());
+            historyText = "对话历史：\n" + String.join("\n", recent) + "\n\n";
+        }
+
+        String reply = generateProductQueryReply(modelProducts, historyText);
 
         return ConversationResponse.builder()
                 .message(reply)
@@ -197,10 +221,18 @@ public class ConversationServiceImpl implements ConversationService {
                 .map(Document::getText)
                 .collect(Collectors.joining("\n---\n"));
 
+        // 注入最近3轮对话历史，支持指代消解
+        String historyText = "";
+        if (!history.isEmpty()) {
+            List<String> recent = history.subList(Math.max(0, history.size() - 6), history.size());
+            historyText = "对话历史：\n" + String.join("\n", recent) + "\n\n";
+        }
+
         String prompt = String.format(
                 "你是电商客服助手。根据以下知识库内容回答用户问题。如果知识库中没有相关信息，请基于常识回答。\n" +
-                        "知识库内容：\n%s\n\n用户问题：%s\n\n请用中文回答，简洁友好。",
+                        "知识库内容：\n%s\n\n%s用户问题：%s\n\n请用中文回答，简洁友好。",
                 context.isEmpty() ? "（暂无相关知识）" : context,
+                historyText,
                 message
         );
 
@@ -266,6 +298,13 @@ public class ConversationServiceImpl implements ConversationService {
     // ========== 意图识别 ==========
 
     private IntentResult recognizeIntent(String message, List<String> history) {
+        // 取最近3轮历史辅助意图识别，支持指代消解（如"那换货呢"）
+        String recentHistory = "";
+        if (!history.isEmpty()) {
+            List<String> recent = history.subList(Math.max(0, history.size() - 6), history.size());
+            recentHistory = "\n对话历史（最近3轮）：\n" + String.join("\n", recent) + "\n";
+        }
+
         String prompt = String.format(
                 "分析用户意图，输出JSON：{\"intent\":\"recommend|product_query|knowledge_query|compare|chitchat\",\"entities\":{...}}\n" +
                         "意图说明：\n" +
@@ -275,8 +314,8 @@ public class ConversationServiceImpl implements ConversationService {
                         "- compare: 用户对比商品（如\"iPhone 和 华为哪个好\"）\n" +
                         "- chitchat: 闲聊\n" +
                         "实体可包含：category(类目), brand(品牌), price_min, price_max, product_name(商品名), product_names(商品名数组), num_items\n" +
-                        "用户消息：%s\n只输出JSON。",
-                message
+                        "%s用户消息：%s\n只输出JSON。",
+                recentHistory, message
         );
 
         try {
@@ -302,7 +341,8 @@ public class ConversationServiceImpl implements ConversationService {
 
     // ========== 回复生成 ==========
 
-    private String generateRecommendReply(String message, List<Product> products, UserProfile profile) {
+    private String generateRecommendReply(String message, List<Product> products, UserProfile profile,
+                                           List<String> history, String longTermContext) {
         if (products.isEmpty()) {
             return "抱歉，暂时没有合适的商品推荐给您。您可以告诉我更具体的需求，比如预算、品牌偏好等。";
         }
@@ -317,12 +357,13 @@ public class ConversationServiceImpl implements ConversationService {
         return sb.toString();
     }
 
-    private String generateProductQueryReply(List<Product> products) {
+    private String generateProductQueryReply(List<Product> products, String historyText) {
         if (products.isEmpty()) {
             return "抱歉，没有找到相关商品。";
         }
         Product p = products.get(0);
-        return String.format("为您找到 %s：\n价格：¥%.0f\n品牌：%s\n类目：%s\n%s",
+        return String.format("%s为您找到 %s：\n价格：¥%.0f\n品牌：%s\n类目：%s\n%s",
+                historyText.isEmpty() ? "" : "",  // history 已在 prompt 层处理
                 p.getName(), p.getPrice(), p.getBrand(), p.getCategory(),
                 p.getDescription() != null ? "描述：" + p.getDescription() + "\n" : "");
     }
@@ -404,11 +445,75 @@ public class ConversationServiceImpl implements ConversationService {
     private void saveHistory(ConversationSession session, List<String> history, Map<String, Object> entities) {
         try {
             session.setDialogueHistory(objectMapper.writeValueAsString(history));
-            session.setExtractedInfo(objectMapper.writeValueAsString(entities));
+            // 合并式更新 extracted_info：新值覆盖旧值，未覆盖字段保留
+            Map<String, Object> merged = mergeExtractedInfo(session.getExtractedInfo(), entities);
+            session.setExtractedInfo(objectMapper.writeValueAsString(merged));
             session.setUpdateTime(LocalDateTime.now());
             conversationSessionService.updateById(session);
         } catch (Exception e) {
             log.warn("ConversationServiceImpl.saveHistory 保存历史失败: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * 合并会话记忆：新值覆盖旧值，未覆盖字段保留
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mergeExtractedInfo(String existingJson, Map<String, Object> newEntities) {
+        Map<String, Object> existing = new HashMap<>();
+        if (existingJson != null && !existingJson.isEmpty() && !existingJson.equals("{}")) {
+            try {
+                existing = objectMapper.readValue(existingJson, Map.class);
+            } catch (Exception e) {
+                log.warn("ConversationServiceImpl.mergeExtractedInfo 解析失败: {}", e.getMessage());
+            }
+        }
+        existing.putAll(newEntities); // 新值覆盖旧值，旧字段保留
+        return existing;
+    }
+
+    /**
+     * 读取会话记忆（extracted_info），合并到当前实体
+     * 通过 sessionId 隔离，不同用户的会话记忆互不干扰
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mergeWithSessionMemory(String sessionId, Map<String, Object> currentEntities) {
+        try {
+            ConversationSession session = conversationSessionService.getBySessionId(sessionId);
+            if (session == null || session.getExtractedInfo() == null) return currentEntities;
+            Map<String, Object> sessionMemory = objectMapper.readValue(session.getExtractedInfo(), Map.class);
+            // 会话记忆作为基础，当前轮次实体覆盖（当前轮次优先级更高）
+            Map<String, Object> merged = new HashMap<>(sessionMemory);
+            merged.putAll(currentEntities);
+            return merged;
+        } catch (Exception e) {
+            log.warn("ConversationServiceImpl.mergeWithSessionMemory 读取会话记忆失败: {}", e.getMessage());
+            return currentEntities;
+        }
+    }
+
+    /**
+     * 读取长期记忆（user_profile），构建背景上下文字符串
+     */
+    private String buildLongTermContext(String userId) {
+        try {
+            UserProfile profile = userProfileService.getByUserId(userId);
+            if (profile == null) return "";
+            StringBuilder sb = new StringBuilder("用户历史偏好：");
+            if (profile.getPreferredCategories() != null && !profile.getPreferredCategories().isEmpty()) {
+                sb.append("偏好类目=").append(profile.getPreferredCategories()).append("；");
+            }
+            if (profile.getPreferredBrands() != null && !profile.getPreferredBrands().isEmpty()) {
+                sb.append("偏好品牌=").append(profile.getPreferredBrands()).append("；");
+            }
+            if (profile.getPriceRangeMin() != null && profile.getPriceRangeMax() != null) {
+                sb.append("价格区间=¥").append(profile.getPriceRangeMin())
+                  .append("-¥").append(profile.getPriceRangeMax()).append("；");
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            log.warn("ConversationServiceImpl.buildLongTermContext 读取长期记忆失败 userId={}: {}", userId, e.getMessage());
+            return ""; // 降级：不使用长期记忆
         }
     }
 

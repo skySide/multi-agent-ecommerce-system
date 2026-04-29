@@ -222,5 +222,36 @@ CREATE TABLE `conversation_profile_update` (
     INDEX `idx_session_id` (`session_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='对话画像更新记录表';
 
+-- ----------------------------
+-- 购物车表
+-- ----------------------------
+DROP TABLE IF EXISTS `shopping_cart`;
+CREATE TABLE `shopping_cart` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    `user_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '用户ID',
+    `product_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '商品ID',
+    `quantity` INT DEFAULT 1 COMMENT '数量',
+    `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除: 0-否, 1-是',
+    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY `uk_user_product` (`user_id`, `product_id`),
+    INDEX `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='购物车表';
+
+-- ----------------------------
+-- 用户收藏表
+-- ----------------------------
+DROP TABLE IF EXISTS `user_favorite`;
+CREATE TABLE `user_favorite` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    `user_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '用户ID',
+    `product_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '商品ID',
+    `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除: 0-否, 1-是',
+    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY `uk_user_product` (`user_id`, `product_id`),
+    INDEX `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户收藏表';
+
 SET FOREIGN_KEY_CHECKS = 1;
 

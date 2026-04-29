@@ -1,15 +1,122 @@
 import React, { useState, useEffect } from 'react'
-import { Card, Row, Col, Button, Input, message, Spin } from 'antd'
-import { SearchOutlined, HeartOutlined, ShoppingCartOutlined } from '@ant-design/icons'
+import { Card, Row, Col, Button, Input, message, Spin, Badge } from 'antd'
+import { SearchOutlined, HeartFilled, HeartOutlined, ShoppingCartOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 
 const { Search } = Input
 
+// 统一商品字段（兼容 model.Product 和 entity.Product 两种格式）
+function normalizeProduct(p) {
+  return {
+    productId: p.productId,
+    productName: p.productName || p.name || '未知商品',
+    price: p.price,
+    originalPrice: p.originalPrice,
+    mainImage: p.mainImage || 'https://via.placeholder.com/300x200?text=暂无图片',
+    brand: p.brand || '',
+    categoryName: p.categoryName || p.category || '',
+    salesCount: p.salesCount || 0,
+    rating: p.rating || p.score || 5.0,
+    stock: p.stock || 0,
+  }
+}
+
+function ProductCard({ product, userId, onFavoriteChange, onCartChange }) {
+  const [favorited, setFavorited] = useState(false)
+  const [inCart, setInCart] = useState(false)
+  const navigate = useNavigate()
+  const p = normalizeProduct(product)
+
+  useEffect(() => {
+    if (!userId || !p.productId) return
+    api.checkFavorited(userId, p.productId).then(r => setFavorited(r?.favorited || false)).catch(() => {})
+    api.checkInCart(userId, p.productId).then(r => setInCart(r?.inCart || false)).catch(() => {})
+  }, [userId, p.productId])
+
+  const handleFavorite = async (e) => {
+    e.stopPropagation()
+    try {
+      if (favorited) {
+        await api.removeFavorite(userId, p.productId)
+        setFavorited(false)
+        message.success('已取消收藏')
+      } else {
+        await api.addFavorite(userId, p.productId)
+        setFavorited(true)
+        message.success('已收藏')
+      }
+      onFavoriteChange?.()
+    } catch (err) {
+      message.error('操作失败')
+    }
+  }
+
+  const handleCart = async (e) => {
+    e.stopPropagation()
+    try {
+      if (inCart) {
+        await api.removeFromCart(userId, p.productId)
+        setInCart(false)
+        message.success('已从购物车移除')
+      } else {
+        await api.addToCart(userId, p.productId)
+        setInCart(true)
+        message.success('已加入购物车')
+      }
+      onCartChange?.()
+    } catch (err) {
+      message.error('操作失败')
+    }
+  }
+
+  return (
+    <Card
+      hoverable
+      cover={
+        <img
+          alt={p.productName}
+          src={p.mainImage}
+          style={{ height: 200, objectFit: 'cover', cursor: 'pointer' }}
+          onClick={() => navigate(`/product/${p.productId}`)}
+          onError={(e) => { e.target.src = 'https://via.placeholder.com/300x200?text=暂无图片' }}
+        />
+      }
+      actions={[
+        favorited
+          ? <HeartFilled key="favorite" style={{ color: 'red', fontSize: 18 }} onClick={handleFavorite} />
+          : <HeartOutlined key="favorite" style={{ fontSize: 18 }} onClick={handleFavorite} />,
+        inCart
+          ? <CheckCircleOutlined key="cart" style={{ color: '#52c41a', fontSize: 18 }} onClick={handleCart} />
+          : <ShoppingCartOutlined key="cart" style={{ fontSize: 18 }} onClick={handleCart} />,
+        <Button key="detail" type="primary" size="small" onClick={() => navigate(`/product/${p.productId}`)}>
+          查看详情
+        </Button>
+      ]}
+    >
+      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {p.productName}
+      </div>
+      <div style={{ marginBottom: 6 }}>
+        <span style={{ color: 'red', fontSize: 18, fontWeight: 'bold' }}>¥{p.price}</span>
+        {p.originalPrice && Number(p.originalPrice) > Number(p.price) && (
+          <span style={{ color: '#999', fontSize: 13, marginLeft: 8, textDecoration: 'line-through' }}>
+            ¥{p.originalPrice}
+          </span>
+        )}
+      </div>
+      <div style={{ color: '#999', fontSize: 12 }}>
+        {p.brand && <span style={{ marginRight: 8 }}>{p.brand}</span>}
+        销量: {p.salesCount} | 评分: {Number(p.rating).toFixed(1)}
+      </div>
+    </Card>
+  )
+}
+
 function HomePage() {
   const [recommendations, setRecommendations] = useState([])
   const [loading, setLoading] = useState(true)
-  const [userId] = useState('user123')
+  const userId = localStorage.getItem('userId') || 'user123'
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -19,31 +126,27 @@ function HomePage() {
   const fetchRecommendations = async () => {
     setLoading(true)
     try {
-      const response = await api.recommend(userId, 'homepage', 6)
-      // api.js 已解包 Result.data，response 就是 RecommendationResponse
-      if (response && response.products && response.products.length > 0) {
+      const response = await api.recommend(userId, 'homepage', 8)
+      if (response?.products?.length > 0) {
         setRecommendations(response.products)
-      } else {
-        const hotResponse = await api.getHotProducts(6)
-        // hot 接口返回 Result<List<Product>>，解包后是数组
-        if (hotResponse && Array.isArray(hotResponse) && hotResponse.length > 0) {
-          setRecommendations(hotResponse)
-        }
+        return
       }
     } catch (error) {
-      console.error('获取推荐失败:', error)
-      message.warning('获取推荐失败，显示热门商品')
-      try {
-        const hotResponse = await api.getHotProducts(6)
-        if (hotResponse && Array.isArray(hotResponse) && hotResponse.length > 0) {
-          setRecommendations(hotResponse)
-        }
-      } catch (hotError) {
-        console.error('获取热门商品失败:', hotError)
+      console.error('推荐接口失败，降级到热门商品:', error)
+    }
+    // 降级：热门商品
+    try {
+      const hotProducts = await api.getHotProducts(8)
+      if (hotProducts?.length > 0) {
+        setRecommendations(hotProducts)
       }
+    } catch (err) {
+      console.error('获取热门商品失败:', err)
+      message.warning('暂时无法加载商品')
     } finally {
       setLoading(false)
     }
+    setLoading(false)
   }
 
   const handleSearch = (value) => {
@@ -52,136 +155,39 @@ function HomePage() {
     }
   }
 
-  const handleProductClick = (productId) => {
-    navigate(`/product/${productId}`)
-  }
-
-  const handleRecordBehavior = async (productId, behaviorType) => {
-    try {
-      await api.recordBehavior(userId, behaviorType, productId)
-    } catch (error) {
-      console.error('记录行为失败:', error)
-    }
-  }
-
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto' }}>
-      <div style={{ marginBottom: 30, textAlign: 'center' }}>
-        <h1 style={{ marginBottom: 20 }}>个性化推荐</h1>
+    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 16px' }}>
+      <div style={{ marginBottom: 32, textAlign: 'center' }}>
+        <h1 style={{ marginBottom: 16 }}>个性化推荐</h1>
         <Search
-          placeholder="搜索商品"
+          placeholder="搜索商品名称、品牌..."
           allowClear
           enterButton={<SearchOutlined />}
           size="large"
           onSearch={handleSearch}
-          style={{ maxWidth: 600, margin: '0 auto' }}
+          style={{ maxWidth: 600 }}
         />
       </div>
 
-      <div className="recommendation-section">
-        <h2 style={{ marginBottom: 20 }}>为您推荐</h2>
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: 100 }}>
-            <Spin size="large" />
-          </div>
-        ) : recommendations.length > 0 ? (
-          <Row gutter={[16, 16]}>
-            {recommendations.map((product) => (
-              <Col xs={24} sm={12} md={8} lg={6} key={product.productId}>
-                <Card
-                  className="product-card"
-                  cover={
-                    <img
-                      alt={product.productName}
-                      src={product.mainImage}
-                      style={{ height: 200, objectFit: 'cover' }}
-                      onClick={() => {
-                        handleProductClick(product.productId)
-                        handleRecordBehavior(product.productId, 'view')
-                      }}
-                    />
-                  }
-                  actions={[
-                    <HeartOutlined 
-                      key="favorite" 
-                      onClick={() => handleRecordBehavior(product.productId, 'favorite')}
-                    />,
-                    <ShoppingCartOutlined 
-                      key="cart"
-                      onClick={() => handleRecordBehavior(product.productId, 'cart')}
-                    />,
-                    <Button 
-                      key="buy" 
-                      type="primary" 
-                      onClick={() => handleProductClick(product.productId)}
-                    >
-                      查看详情
-                    </Button>
-                  ]}
-                >
-                  <h3 style={{ marginBottom: 10, fontSize: 16 }}>{product.productName}</h3>
-                  <div style={{ marginBottom: 10 }}>
-                    <span style={{ color: 'red', fontSize: 18, fontWeight: 'bold' }}>
-                      ¥{product.price}
-                    </span>
-                    {product.originalPrice && product.originalPrice > product.price && (
-                      <span style={{ color: '#999', fontSize: 14, marginLeft: 10, textDecoration: 'line-through' }}>
-                        ¥{product.originalPrice}
-                      </span>
-                    )}
-                  </div>
-                  <div style={{ color: '#999', fontSize: 12 }}>
-                    销量: {product.salesCount || 0} | 评分: {product.rating || 5.0}
-                  </div>
-                </Card>
-              </Col>
-            ))}
-          </Row>
-        ) : (
-          <div style={{ textAlign: 'center', padding: 50 }}>
-            <p>暂无推荐商品</p>
-            <Button type="primary" onClick={fetchRecommendations}>
-              刷新
-            </Button>
-          </div>
-        )}
-      </div>
-
-      <div className="personalized-section">
-        <h2 style={{ marginBottom: 20, marginTop: 40 }}>热门商品</h2>
+      <h2 style={{ marginBottom: 16 }}>为您推荐</h2>
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 100 }}>
+          <Spin size="large" tip="AI正在为您生成个性化推荐..." />
+        </div>
+      ) : recommendations.length > 0 ? (
         <Row gutter={[16, 16]}>
-          {recommendations.slice(0, 4).map((product) => (
-            <Col xs={24} sm={12} md={6} key={product.productId}>
-              <Card
-                className="product-card"
-                cover={
-                  <img
-                    alt={product.productName}
-                    src={product.mainImage}
-                    style={{ height: 150, objectFit: 'cover' }}
-                    onClick={() => handleProductClick(product.productId)}
-                  />
-                }
-                actions={[
-                  <Button 
-                    key="buy" 
-                    type="primary" 
-                    size="small"
-                    onClick={() => handleProductClick(product.productId)}
-                  >
-                    查看详情
-                  </Button>
-                ]}
-              >
-                <h3 style={{ marginBottom: 10, fontSize: 14 }}>{product.productName}</h3>
-                <div style={{ color: 'red', fontSize: 16, fontWeight: 'bold' }}>
-                  ¥{product.price}
-                </div>
-              </Card>
+          {recommendations.map((product) => (
+            <Col xs={24} sm={12} md={8} lg={6} key={product.productId}>
+              <ProductCard product={product} userId={userId} />
             </Col>
           ))}
         </Row>
-      </div>
+      ) : (
+        <div style={{ textAlign: 'center', padding: 50 }}>
+          <p>暂无推荐商品</p>
+          <Button type="primary" onClick={fetchRecommendations}>刷新</Button>
+        </div>
+      )}
     </div>
   )
 }
