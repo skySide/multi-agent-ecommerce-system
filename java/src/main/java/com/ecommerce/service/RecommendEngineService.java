@@ -1,7 +1,7 @@
 package com.ecommerce.service;
 
 import com.ecommerce.entity.Product;
-import com.ecommerce.model.UserProfile;
+import com.ecommerce.entity.UserProfile;
 
 import java.util.List;
 import java.util.Map;

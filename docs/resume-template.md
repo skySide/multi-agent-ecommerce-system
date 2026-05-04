@@ -40,7 +40,9 @@ GitHub: github.com/bcefghj/multi-agent-ecommerce
   Prompt三层实验,推荐CTR提升15%
 • 集成LLM实现个性化营销文案生成,5套Prompt模板覆盖新客/VIP/
   价格敏感等用户分群,广告法合规率100%
-• 提供Python(LangGraph)/Java(Spring AI)/Go(goroutine)三语言实现
+• 提供Python(LangGraph)/Java(Spring AI)/Go(goroutine)三语言实现,
+  Java版采用CompletableFuture并行编排,BaseAgent模板方法模式
+  实现重试/超时/降级四层稳定性保障
 
 技术栈: LangGraph · Spring AI · Go · Redis · Milvus · FastAPI
 ```
@@ -67,6 +69,37 @@ GitHub: github.com/bcefghj/multi-agent-ecommerce
 
 • 多语言交付: Python/Java/Go三语言实现+Docker一键部署,
   降低跨团队技术栈接入门槛
+
+• Java工程化: Spring AI + CompletableFuture并行编排,
+  BeanOutputConverter结构化输出,BaseAgent模板方法模式,
+  严格遵循日志规范(类名.方法名格式)和判空规范
+```
+
+---
+
+## 模板三：Java后端工程师（突出Spring生态）
+
+```
+多Agent电商推荐与营销系统 | 核心开发 | 2026.01-2026.04
+
+• Spring AI集成: 基于Spring Boot 3.2 + Spring AI 1.0实现,
+  ChatClient统一LLM调用,BeanOutputConverter实现JSON→POJO自动映射,
+  与Spring生态(Actuator/Security)无缝集成
+
+• 并行编排: CompletableFuture实现Agent并行执行,
+  自定义线程池(7大参数完整配置),两阶段并行策略优化延迟
+
+• 稳定性设计: BaseAgent抽象类封装重试(指数退避)/超时/降级,
+  模板方法模式统一稳定性保障,Agent级别熔断机制
+
+• 代码规范: 严格遵循日志规范(类名.方法名格式,error打印完整堆栈),
+  @Resource注入,Objects.isNull/StringUtils.isBlank判空,
+  Result<T>统一返回格式
+
+• 数据层: MyBatis-Plus + MySQL业务数据,Redis实时特征,
+  Spring Data Redis Lettuce连接池
+
+技术栈: Spring Boot 3.2 · Spring AI 1.0 · MyBatis-Plus · Redis · MySQL
 ```
 
 ---
@@ -96,7 +129,11 @@ GitHub: github.com/bcefghj/multi-agent-ecommerce
 ### 推荐系统工程师
 重点: 多路召回、LLM重排、实时特征、A/B测试
 
-### 后端工程师
+### Java后端工程师
+重点: Spring AI集成、CompletableFuture并行编排、BaseAgent模板方法模式、
+      代码规范(日志/注入/判空)、MyBatis-Plus、Spring Boot 3
+
+### 后端工程师（通用）
 重点: 并行编排(asyncio/CompletableFuture/goroutine)、
       Redis、微服务、Docker部署
 

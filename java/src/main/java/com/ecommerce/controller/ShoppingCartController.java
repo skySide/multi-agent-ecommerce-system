@@ -60,6 +60,11 @@ public class ShoppingCartController {
         String userId = body.get("userId");
         String productId = body.get("productId");
         boolean success = shoppingCartService.removeItem(userId, productId);
+        try {
+            userBehaviorService.recordBehavior(userId, productId, "remove_from_cart", null, "cart_page");
+        } catch (Exception e) {
+            log.warn("记录移除购物车行为失败: {}", e.getMessage());
+        }
         return Result.success(Map.of("success", success, "inCart", false));
     }
 

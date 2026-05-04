@@ -26,17 +26,22 @@ class ApiService {
     }
   }
 
-  // ===== 商品 =====
-  async getHotProducts(limit = 10) {
-    return this.request(`${API_BASE_URL}/v1/products/hot?limit=${limit}`)
+  // ===== 商品（userId 可选，传入后后端返回收藏/购物车标记） =====
+  async getHotProducts(limit = 10, userId) {
+    const query = [`limit=${limit}`]
+    if (userId) query.push(`userId=${userId}`)
+    return this.request(`${API_BASE_URL}/v1/products/hot?${query.join('&')}`)
   }
 
-  async searchProducts(keyword, limit = 10) {
-    return this.request(`${API_BASE_URL}/v1/products/search?keyword=${encodeURIComponent(keyword)}&limit=${limit}`)
+  async searchProducts(keyword, limit = 10, userId) {
+    const query = [`keyword=${encodeURIComponent(keyword)}`, `limit=${limit}`]
+    if (userId) query.push(`userId=${userId}`)
+    return this.request(`${API_BASE_URL}/v1/products/search?${query.join('&')}`)
   }
 
-  async getProduct(productId) {
-    return this.request(`${API_BASE_URL}/v1/products/${productId}`)
+  async getProduct(productId, userId) {
+    const query = userId ? `?userId=${userId}` : ''
+    return this.request(`${API_BASE_URL}/v1/products/${productId}${query}`)
   }
 
   // ===== 推荐 =====

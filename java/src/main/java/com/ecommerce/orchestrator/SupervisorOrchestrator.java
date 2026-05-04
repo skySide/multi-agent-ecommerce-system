@@ -1,7 +1,11 @@
 package com.ecommerce.orchestrator;
 
 import com.ecommerce.agent.*;
-import com.ecommerce.model.*;
+import com.ecommerce.entity.UserProfile;
+import com.ecommerce.model.AgentResult;
+import com.ecommerce.model.Product;
+import com.ecommerce.model.RecommendationRequest;
+import com.ecommerce.model.RecommendationResponse;
 import com.ecommerce.service.ABTestService;
 import jakarta.annotation.Resource;
 import org.slf4j.Logger;
@@ -162,10 +166,7 @@ public class SupervisorOrchestrator {
         boolean hasSegments = profile.getSegments() != null && !profile.getSegments().isEmpty();
         boolean hasCategoryPreference = profile.getPreferredCategories() != null
                 && !profile.getPreferredCategories().isEmpty();
-        boolean hasPriceRange = profile.getPriceRange() != null && profile.getPriceRange().length >= 2;
-        boolean hasBehaviorSignal = profile.getRecentViews() != null && !profile.getRecentViews().isEmpty();
-        hasBehaviorSignal = hasBehaviorSignal
-                || (profile.getRecentPurchases() != null && !profile.getRecentPurchases().isEmpty());
-        return hasSegments || hasCategoryPreference || hasPriceRange || hasBehaviorSignal;
+        boolean hasPriceRange = profile.getPriceRangeMin() != null && profile.getPriceRangeMax() != null;
+        return hasSegments || hasCategoryPreference || hasPriceRange;
     }
 }

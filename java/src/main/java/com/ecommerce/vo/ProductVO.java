@@ -62,4 +62,12 @@ public class ProductVO implements Serializable {
 
     /** 商品状态 */
     private int productStatus;
+
+    /** 当前用户是否已收藏 */
+    @Builder.Default
+    private boolean favorited = false;
+
+    /** 当前用户是否已加入购物车 */
+    @Builder.Default
+    private boolean inCart = false;
 }

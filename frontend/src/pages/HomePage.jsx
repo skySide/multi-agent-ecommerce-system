@@ -1,52 +1,40 @@
 import React, { useState, useEffect } from 'react'
-import { Card, Row, Col, Button, Input, message, Spin, Badge } from 'antd'
+import { Card, Row, Col, Button, Input, message, Spin } from 'antd'
 import { SearchOutlined, HeartFilled, HeartOutlined, ShoppingCartOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 
 const { Search } = Input
 
-// 统一商品字段（兼容 model.Product 和 entity.Product 两种格式）
-function normalizeProduct(p) {
-  return {
-    productId: p.productId,
-    productName: p.productName || p.name || '未知商品',
-    price: p.price,
-    originalPrice: p.originalPrice,
-    mainImage: p.mainImage || 'https://via.placeholder.com/300x200?text=暂无图片',
-    brand: p.brand || '',
-    categoryName: p.categoryName || p.category || '',
-    salesCount: p.salesCount || 0,
-    rating: p.rating || p.score || 5.0,
-    stock: p.stock || 0,
-  }
-}
-
-function ProductCard({ product, userId, onFavoriteChange, onCartChange }) {
-  const [favorited, setFavorited] = useState(false)
-  const [inCart, setInCart] = useState(false)
+function ProductCard({ product, userId, onDataChange }) {
+  const [favorited, setFavorited] = useState(product.favorited || false)
+  const [inCart, setInCart] = useState(product.inCart || false)
   const navigate = useNavigate()
-  const p = normalizeProduct(product)
+  const isLoggedIn = !!userId
 
   useEffect(() => {
-    if (!userId || !p.productId) return
-    api.checkFavorited(userId, p.productId).then(r => setFavorited(r?.favorited || false)).catch(() => {})
-    api.checkInCart(userId, p.productId).then(r => setInCart(r?.inCart || false)).catch(() => {})
-  }, [userId, p.productId])
+    setFavorited(product.favorited || false)
+    setInCart(product.inCart || false)
+  }, [product.favorited, product.inCart])
+
+  const requireLogin = () => {
+    message.warning('请先登录')
+  }
 
   const handleFavorite = async (e) => {
     e.stopPropagation()
+    if (!isLoggedIn) { requireLogin(); return }
     try {
       if (favorited) {
-        await api.removeFavorite(userId, p.productId)
+        await api.removeFavorite(userId, product.productId)
         setFavorited(false)
         message.success('已取消收藏')
       } else {
-        await api.addFavorite(userId, p.productId)
+        await api.addFavorite(userId, product.productId)
         setFavorited(true)
         message.success('已收藏')
       }
-      onFavoriteChange?.()
+      onDataChange?.()
     } catch (err) {
       message.error('操作失败')
     }
@@ -54,51 +42,60 @@ function ProductCard({ product, userId, onFavoriteChange, onCartChange }) {
 
   const handleCart = async (e) => {
     e.stopPropagation()
+    if (!isLoggedIn) { requireLogin(); return }
     try {
       if (inCart) {
-        await api.removeFromCart(userId, p.productId)
+        await api.removeFromCart(userId, product.productId)
         setInCart(false)
         message.success('已从购物车移除')
       } else {
-        await api.addToCart(userId, p.productId)
+        await api.addToCart(userId, product.productId)
         setInCart(true)
         message.success('已加入购物车')
       }
-      onCartChange?.()
+      onDataChange?.()
     } catch (err) {
       message.error('操作失败')
     }
   }
+
+  const handleDetail = () => {
+    if (!isLoggedIn) { requireLogin(); return }
+    navigate(`/product/${product.productId}`)
+  }
+
+  const p = product
+  const rating = p.rating != null ? Number(p.rating) : 5.0
 
   return (
     <Card
       hoverable
       cover={
         <img
-          alt={p.productName}
-          src={p.mainImage}
-          style={{ height: 200, objectFit: 'cover', cursor: 'pointer' }}
-          onClick={() => navigate(`/product/${p.productId}`)}
+          alt={p.productName || '商品'}
+          src={p.mainImage || 'https://via.placeholder.com/300x200?text=暂无图片'}
+          style={{ height: 200, objectFit: 'cover', cursor: isLoggedIn ? 'pointer' : 'not-allowed' }}
+          onClick={handleDetail}
           onError={(e) => { e.target.src = 'https://via.placeholder.com/300x200?text=暂无图片' }}
         />
       }
       actions={[
         favorited
-          ? <HeartFilled key="favorite" style={{ color: 'red', fontSize: 18 }} onClick={handleFavorite} />
-          : <HeartOutlined key="favorite" style={{ fontSize: 18 }} onClick={handleFavorite} />,
+          ? <HeartFilled key="fav" style={{ color: 'red', fontSize: 18, opacity: isLoggedIn ? 1 : 0.4 }} onClick={handleFavorite} />
+          : <HeartOutlined key="fav" style={{ fontSize: 18, opacity: isLoggedIn ? 1 : 0.4 }} onClick={handleFavorite} />,
         inCart
-          ? <CheckCircleOutlined key="cart" style={{ color: '#52c41a', fontSize: 18 }} onClick={handleCart} />
-          : <ShoppingCartOutlined key="cart" style={{ fontSize: 18 }} onClick={handleCart} />,
-        <Button key="detail" type="primary" size="small" onClick={() => navigate(`/product/${p.productId}`)}>
-          查看详情
-        </Button>
+          ? <CheckCircleOutlined key="cart" style={{ color: '#52c41a', fontSize: 18, opacity: isLoggedIn ? 1 : 0.4 }} onClick={handleCart} />
+          : <ShoppingCartOutlined key="cart" style={{ fontSize: 18, opacity: isLoggedIn ? 1 : 0.4 }} onClick={handleCart} />,
+        <Button key="detail" type="primary" size="small" onClick={handleDetail}>查看详情</Button>,
       ]}
     >
       <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {p.productName}
+        {p.productName || p.name || '未知商品'}
       </div>
       <div style={{ marginBottom: 6 }}>
-        <span style={{ color: 'red', fontSize: 18, fontWeight: 'bold' }}>¥{p.price}</span>
+        <span style={{ color: 'red', fontSize: 18, fontWeight: 'bold' }}>
+          ¥{p.price != null ? (typeof p.price === 'number' ? p.price : p.price) : '--'}
+        </span>
         {p.originalPrice && Number(p.originalPrice) > Number(p.price) && (
           <span style={{ color: '#999', fontSize: 13, marginLeft: 8, textDecoration: 'line-through' }}>
             ¥{p.originalPrice}
@@ -107,7 +104,7 @@ function ProductCard({ product, userId, onFavoriteChange, onCartChange }) {
       </div>
       <div style={{ color: '#999', fontSize: 12 }}>
         {p.brand && <span style={{ marginRight: 8 }}>{p.brand}</span>}
-        销量: {p.salesCount} | 评分: {Number(p.rating).toFixed(1)}
+        销量: {p.salesCount || 0} | 评分: {rating.toFixed(1)}
       </div>
     </Card>
   )
@@ -116,38 +113,25 @@ function ProductCard({ product, userId, onFavoriteChange, onCartChange }) {
 function HomePage() {
   const [recommendations, setRecommendations] = useState([])
   const [loading, setLoading] = useState(true)
-  const userId = localStorage.getItem('userId') || 'user123'
+  const userId = localStorage.getItem('userId') || null
   const navigate = useNavigate()
-
-  useEffect(() => {
-    fetchRecommendations()
-  }, [userId])
 
   const fetchRecommendations = async () => {
     setLoading(true)
     try {
-      const response = await api.recommend(userId, 'homepage', 8)
-      if (response?.products?.length > 0) {
-        setRecommendations(response.products)
-        return
-      }
+      const response = await api.recommend(userId || '', 'homepage', 8)
+      const products = response?.productVOList || []
+      setRecommendations(products)
     } catch (error) {
-      console.error('推荐接口失败，降级到热门商品:', error)
-    }
-    // 降级：热门商品
-    try {
-      const hotProducts = await api.getHotProducts(8)
-      if (hotProducts?.length > 0) {
-        setRecommendations(hotProducts)
-      }
-    } catch (err) {
-      console.error('获取热门商品失败:', err)
-      message.warning('暂时无法加载商品')
+      console.error('推荐接口失败:', error)
     } finally {
       setLoading(false)
     }
-    setLoading(false)
   }
+
+  useEffect(() => {
+    fetchRecommendations()
+  }, [userId])
 
   const handleSearch = (value) => {
     if (value.trim()) {
@@ -178,7 +162,7 @@ function HomePage() {
         <Row gutter={[16, 16]}>
           {recommendations.map((product) => (
             <Col xs={24} sm={12} md={8} lg={6} key={product.productId}>
-              <ProductCard product={product} userId={userId} />
+              <ProductCard product={product} userId={userId} onDataChange={fetchRecommendations} />
             </Col>
           ))}
         </Row>

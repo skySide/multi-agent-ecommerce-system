@@ -2,7 +2,9 @@ package com.ecommerce.service.impl;
 
 import com.ecommerce.entity.ConversationSession;
 import com.ecommerce.entity.UserProfile;
-import com.ecommerce.model.*;
+import com.ecommerce.model.ConversationRequest;
+import com.ecommerce.model.ConversationResponse;
+import com.ecommerce.model.Product;
 import com.ecommerce.service.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
@@ -388,18 +390,18 @@ public class ConversationServiceImpl implements ConversationService {
     private UserProfile buildProfileFromEntities(String userId, Map<String, Object> entities) {
         UserProfile profile = UserProfile.builder().userId(userId).build();
 
-        // 类目偏好
+        // 类目偏好 → entity 存逗号分隔字符串
         if (entities.get("category") instanceof String) {
-            profile.setPreferredCategories(List.of((String) entities.get("category")));
+            profile.setPreferredCategories((String) entities.get("category"));
         } else if (entities.get("category") instanceof List) {
             @SuppressWarnings("unchecked")
             List<String> cats = (List<String>) entities.get("category");
-            profile.setPreferredCategories(cats);
+            profile.setPreferredCategories(String.join(",", cats));
         }
 
-        // 品牌偏好
+        // 品牌偏好 → entity 存逗号分隔字符串
         if (entities.get("brand") instanceof String) {
-            profile.setRecentViews(List.of((String) entities.get("brand")));
+            profile.setPreferredBrands((String) entities.get("brand"));
         }
 
         // 价格范围
@@ -411,7 +413,8 @@ public class ConversationServiceImpl implements ConversationService {
         if (entities.get("price_max") instanceof Number) {
             priceMax = ((Number) entities.get("price_max")).doubleValue();
         }
-        profile.setPriceRange(new double[]{priceMin, priceMax});
+        profile.setPriceRangeMin(java.math.BigDecimal.valueOf(priceMin));
+        profile.setPriceRangeMax(java.math.BigDecimal.valueOf(priceMax));
 
         return profile;
     }

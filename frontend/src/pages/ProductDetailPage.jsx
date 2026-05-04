@@ -8,26 +8,32 @@ function ProductDetailPage() {
   const { id } = useParams()
   const [product, setProduct] = useState(null)
   const [loading, setLoading] = useState(true)
+  // 收藏/购物车状态从后端返回的 ProductVO 中读取，无需单独请求
   const [favorited, setFavorited] = useState(false)
   const [inCart, setInCart] = useState(false)
-  const userId = localStorage.getItem('userId') || 'user123'
+  // 不再使用默认 'user123'，未登录为 null
+  const userId = localStorage.getItem('userId') || null
+  const isLoggedIn = !!userId
   const navigate = useNavigate()
 
   useEffect(() => {
     fetchProductDetail()
   }, [id])
 
+  /** 获取商品详情（后端已返回 favorited/inCart 标记，无需再查） */
   const fetchProductDetail = async () => {
     setLoading(true)
     try {
-      const p = await api.getProduct(id)
+      // 传入 userId 让后端填充收藏/购物车标记
+      const p = await api.getProduct(id, userId || undefined)
       if (p) {
         setProduct(p)
-        // 记录浏览行为
-        api.recordBehavior(userId, 'view', p.productId, null, 'product_detail').catch(() => {})
-        // 检查收藏和购物车状态
-        api.checkFavorited(userId, p.productId).then(r => setFavorited(r?.favorited || false)).catch(() => {})
-        api.checkInCart(userId, p.productId).then(r => setInCart(r?.inCart || false)).catch(() => {})
+        setFavorited(p.favorited || false)
+        setInCart(p.inCart || false)
+        // 只有登录用户才记录浏览行为
+        if (isLoggedIn) {
+          api.recordBehavior(userId, 'view', p.productId, null, 'product_detail').catch(() => {})
+        }
       } else {
         message.error('商品不存在')
       }
@@ -39,7 +45,9 @@ function ProductDetailPage() {
     }
   }
 
+  /** 收藏/取消收藏。未登录时弹提示，不调接口 */
   const handleFavorite = async () => {
+    if (!isLoggedIn) { message.warning('请先登录'); return }
     try {
       if (favorited) {
         await api.removeFavorite(userId, product.productId)
@@ -55,7 +63,9 @@ function ProductDetailPage() {
     }
   }
 
+  /** 加入/移出购物车。未登录时弹提示 */
   const handleCart = async () => {
+    if (!isLoggedIn) { message.warning('请先登录'); return }
     try {
       if (inCart) {
         await api.removeFromCart(userId, product.productId)
@@ -71,7 +81,9 @@ function ProductDetailPage() {
     }
   }
 
+  /** 立即购买。未登录时弹提示 */
   const handleBuyNow = async () => {
+    if (!isLoggedIn) { message.warning('请先登录'); return }
     try {
       await api.recordBehavior(userId, 'purchase', product.productId, null, 'product_detail')
       message.success('购买成功！')
@@ -141,13 +153,14 @@ function ProductDetailPage() {
               {product.categoryName && <Tag color="green">{product.categoryName}</Tag>}
             </div>
 
+            {/* 操作按钮：未登录时可以查看但不能操作，按钮半透明以示不可用 */}
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 24 }}>
               <Button type="primary" size="large" style={{ minWidth: 140 }} onClick={handleBuyNow} disabled={!product.stock}>
                 立即购买
               </Button>
               <Button
                 size="large"
-                style={{ minWidth: 140 }}
+                style={{ minWidth: 140, opacity: isLoggedIn ? 1 : 0.5 }}
                 icon={inCart ? <CheckCircleOutlined style={{ color: '#52c41a' }} /> : <ShoppingCartOutlined />}
                 onClick={handleCart}
               >
@@ -157,7 +170,7 @@ function ProductDetailPage() {
                 size="large"
                 icon={favorited ? <HeartFilled style={{ color: 'red' }} /> : <HeartOutlined />}
                 onClick={handleFavorite}
-                style={{ minWidth: 100 }}
+                style={{ minWidth: 100, opacity: isLoggedIn ? 1 : 0.5 }}
               >
                 {favorited ? '已收藏' : '收藏'}
               </Button>

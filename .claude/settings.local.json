@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(where mvn *)",
+      "Read(//c/Program Files//**)",
+      "Read(//c//**)"
+    ]
+  }
+}

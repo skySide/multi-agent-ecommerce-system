@@ -11,8 +11,7 @@ import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -30,15 +29,14 @@ public class ProductController {
      * 获取商品详情
      */
     @GetMapping("/{productId}")
-    public Result<ProductVO> getProduct(@PathVariable String productId) {
+    public Result<ProductVO> getProduct(@PathVariable String productId,
+                                         @RequestParam(required = false) String userId) {
         log.info("ProductController.getProduct, productId: {}", productId);
-        Product product = productService.getByProductId(productId);
-        if (product == null) {
+        ProductVO vo = productService.getProductVOByProductId(productId, userId);
+        if (vo == null) {
             return Result.notFound("商品不存在");
         }
-        // 转换为VO
-        ProductVO productVO = convertToVO(product);
-        return Result.success(productVO);
+        return Result.success(vo);
     }
 
     /**
@@ -60,42 +58,30 @@ public class ProductController {
      */
     @GetMapping("/search")
     public Result<List<ProductVO>> searchProducts(@RequestParam String keyword,
-                                                  @RequestParam(defaultValue = "10") int limit) {
+                                                  @RequestParam(defaultValue = "10") int limit,
+                                                  @RequestParam(required = false) String userId) {
         log.info("ProductController.searchProducts, 关键词: {}, 数量: {}", keyword, limit);
-        List<Product> products = productService.searchByKeyword(keyword, limit);
-        // 转换为VO列表
-        List<ProductVO> productVOs = products.stream()
-                .map(this::convertToVO)
-                .collect(Collectors.toList());
-        return Result.success(productVOs);
+        return Result.success(productService.searchProductVOs(keyword, limit, userId));
     }
 
     /**
      * 获取热门商品
      */
     @GetMapping("/hot")
-    public Result<List<ProductVO>> getHotProducts(@RequestParam(defaultValue = "10") int limit) {
+    public Result<List<ProductVO>> getHotProducts(@RequestParam(defaultValue = "10") int limit,
+                                                   @RequestParam(required = false) String userId) {
         log.info("ProductController.getHotProducts, 数量: {}", limit);
-        List<Product> products = productService.listHotProducts(limit);
-        // 转换为VO列表
-        List<ProductVO> productVOs = products.stream()
-                .map(this::convertToVO)
-                .collect(Collectors.toList());
-        return Result.success(productVOs);
+        return Result.success(productService.listHotProductVOs(limit, userId));
     }
 
     /**
      * 获取新品
      */
     @GetMapping("/new")
-    public Result<List<ProductVO>> getNewArrivals(@RequestParam(defaultValue = "10") int limit) {
+    public Result<List<ProductVO>> getNewArrivals(@RequestParam(defaultValue = "10") int limit,
+                                                   @RequestParam(required = false) String userId) {
         log.info("ProductController.getNewArrivals, 数量: {}", limit);
-        List<Product> products = productService.listNewArrivals(limit);
-        // 转换为VO列表
-        List<ProductVO> productVOs = products.stream()
-                .map(this::convertToVO)
-                .collect(Collectors.toList());
-        return Result.success(productVOs);
+        return Result.success(productService.listNewArrivalVOs(limit, userId));
     }
 
     /**
@@ -103,14 +89,10 @@ public class ProductController {
      */
     @GetMapping("/category/{categoryId}")
     public Result<List<ProductVO>> getByCategory(@PathVariable String categoryId,
-                                                 @RequestParam(defaultValue = "10") int limit) {
+                                                  @RequestParam(defaultValue = "10") int limit,
+                                                  @RequestParam(required = false) String userId) {
         log.info("ProductController.getByCategory, 类目: {}, 数量: {}", categoryId, limit);
-        List<Product> products = productService.listByCategoryId(categoryId, 1, 0);
-        // 转换为VO列表
-        List<ProductVO> productVOs = products.stream()
-                .map(this::convertToVO)
-                .collect(Collectors.toList());
-        return Result.success(productVOs);
+        return Result.success(productService.listByCategoryVOs(categoryId, limit, userId));
     }
 
     /**

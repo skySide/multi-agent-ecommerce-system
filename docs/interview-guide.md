@@ -502,7 +502,208 @@ services:
 
 ---
 
-## 六、面试前的准备清单
+## 六、Java/Spring AI 实现亮点（Q31-Q40）
+
+### Q31: Java版为什么选择Spring AI而不是LangChain4j?
+
+| 维度 | Spring AI | LangChain4j |
+|------|-----------|-------------|
+| 生态集成 | Spring Boot原生,自动配置 | 需要手动集成 |
+| 向量存储 | 内置Milvus/Redis/Pinecone | 需要额外适配 |
+| 并行模型 | CompletableFuture + WebFlux | 基于Vert.x |
+| 企业级 | Spring Security/Actuator开箱即用 | 需要自行集成 |
+
+选择Spring AI的原因: 项目需要与Spring Boot 3深度集成,使用Spring AI可以复用Spring生态的配置管理、健康检查、安全控制等能力。
+
+### Q32: BaseAgent的设计模式是什么?
+
+**模板方法模式 + 策略模式**:
+
+```java
+public abstract class BaseAgent {
+    // 模板方法: 定义执行骨架(重试→超时→降级)
+    public CompletableFuture<AgentResult> runAsync(Map<String, Object> params) {
+        // 1. 重试机制(指数退避)
+        // 2. 超时控制
+        // 3. 指标收集
+        // 4. 降级策略
+    }
+    
+    // 抽象方法: 子类实现具体逻辑
+    protected abstract AgentResult execute(Map<String, Object> params);
+    
+    // 钩子方法: 子类可覆盖降级逻辑
+    protected AgentResult fallback(double latencyMs, Exception e) { ... }
+}
+```
+
+优点:
+- 统一的稳定性保障(重试/超时/降级)在父类实现
+- 子类只需关注业务逻辑
+- 符合开闭原则
+
+### Q33: Java版如何实现Agent并行执行?
+
+**CompletableFuture + 自定义线程池**:
+
+```java
+// SupervisorOrchestrator.java
+public RecommendationResponse recommend(RecommendationRequest request) {
+    // Phase 1: 用户画像和商品召回并行
+    CompletableFuture<AgentResult> profileFuture = userProfileAgent.runAsync(params);
+    CompletableFuture<AgentResult> recallFuture = productRecAgent.runAsync(params);
+    
+    // 等待Phase 1完成
+    CompletableFuture.allOf(profileFuture, recallFuture).join();
+    
+    // Phase 2: 重排和库存并行(依赖Phase 1结果)
+    UserProfile profile = (UserProfile) profileFuture.get().getData().get("profile");
+    List<Product> candidates = (List<Product>) recallFuture.get().getData().get("products");
+    
+    CompletableFuture<AgentResult> rerankFuture = ...;
+    CompletableFuture<AgentResult> inventoryFuture = inventoryAgent.runAsync(...);
+    
+    // Phase 3: 文案生成(串行)
+    ...
+}
+```
+
+vs Python asyncio: CompletableFuture更符合Java开发者习惯,且可以与Spring WebFlux无缝集成。
+
+### Q34: Spring AI的结构化输出怎么用?
+
+**BeanOutputConverter实现JSON→POJO自动映射**:
+
+```java
+// 定义DTO
+public class UserProfileAnalysisDTO {
+    private List<String> segments;
+    private List<String> preferredCategories;
+    private Map<String, Double> rfmScore;
+    // ...
+}
+
+// 使用结构化输出
+BeanOutputConverter<UserProfileAnalysisDTO> converter = 
+    new BeanOutputConverter<>(UserProfileAnalysisDTO.class);
+
+String response = chatClient.prompt()
+    .system(SYSTEM_PROMPT + "\n" + converter.getFormat())  // 自动注入JSON Schema
+    .user("分析用户: " + userId)
+    .call()
+    .content();
+
+UserProfileAnalysisDTO result = converter.convert(response);  // 自动解析
+```
+
+优点: 避免手动解析JSON,类型安全,LLM输出格式更规范。
+
+### Q35: Java代码规范中最重要的是什么?
+
+**日志规范**:
+- 格式: `类名.方法名 - 操作描述, 参数`
+- error日志必须打印完整堆栈: `log.error("xxx", e)` 而非 `log.error("xxx", e.getMessage())`
+
+**Bean注入**:
+- 使用 `@Resource` 而非 `@Autowired`
+- 多Bean时用 `@Resource(name = "xxx")` 区分
+
+**判空规范**:
+- 对象: `Objects.isNull()` / `Objects.nonNull()`
+- 字符串: `StringUtils.isBlank()`
+- 集合: `CollectionUtils.isEmpty()`
+
+### Q36: 如何保证Agent调用的稳定性?
+
+**四层防护机制**:
+
+```java
+// BaseAgent.runAsync() 实现
+public CompletableFuture<AgentResult> runAsync(Map<String, Object> params) {
+    return CompletableFuture.supplyAsync(() -> {
+        int attempt = 0;
+        while (attempt < maxRetries) {
+            try {
+                return execute(params);  // 业务逻辑
+            } catch (Exception e) {
+                attempt++;
+                if (attempt < maxRetries) {
+                    Thread.sleep(500 * Math.pow(2, attempt - 1));  // 指数退避
+                }
+            }
+        }
+        return fallback(latencyMs, lastError);  // 降级
+    }).orTimeout(timeoutSeconds, TimeUnit.SECONDS);  // 超时控制
+}
+```
+
+### Q37: 营销文案Agent如何实现广告法合规?
+
+**关键词过滤 + 正则替换**:
+
+```java
+private static final List<String> FORBIDDEN_WORDS = List.of(
+    "最好", "第一", "国家级", "全球首", "绝对", "100%", "永久", "万能"
+);
+
+private Map<String, String> complianceCheck(Map<String, String> copyItem) {
+    String text = copyItem.get("copy");
+    for (String word : FORBIDDEN_WORDS) {
+        text = text.replace(word, "***");
+    }
+    copyItem.put("copy", text);
+    return copyItem;
+}
+```
+
+扩展方案: 可接入第三方合规API或用LLM做语义级判断。
+
+### Q38: 库存Agent的限购策略是什么?
+
+**动态限购规则**:
+
+```java
+private Integer calcPurchaseLimit(Product product, int stock) {
+    boolean isHot = isHotProduct(product);
+    if (stock <= 50) return 1;                    // 紧急限购1件
+    if (stock <= 100 && isHot) return 2;          // 热门低库存限购2件
+    if (isHot && stock <= 300) return 3;          // 热门正常库存限购3件
+    return null;  // 不限购
+}
+```
+
+热销判断: 销量>1000 或 描述包含"新品/旗舰/热销"。
+
+### Q39: Java版与Python版的核心差异?
+
+| 维度 | Python (LangGraph) | Java (Spring AI) |
+|------|-------------------|------------------|
+| 并行模型 | asyncio.gather | CompletableFuture |
+| 状态管理 | TypedDict | Spring Bean |
+| LLM调用 | LangChain ChatModel | Spring AI ChatClient |
+| 结构化输出 | Pydantic | BeanOutputConverter |
+| 配置管理 | .env + pydantic-settings | application.yml |
+| 部署 | FastAPI + Uvicorn | Spring Boot JAR |
+
+选择建议: AI团队快速迭代选Python,企业级Java生态选Java。
+
+### Q40: 项目中遇到的最大挑战是什么?
+
+**LLM输出不稳定问题**:
+
+问题: LLM有时返回非JSON格式,导致解析失败,成功率仅85%。
+
+解决方案:
+1. **结构化Prompt**: 明确要求JSON格式,给出示例
+2. **BeanOutputConverter**: 自动注入JSON Schema
+3. **重试机制**: 解析失败时重试,指数退避
+4. **降级策略**: 最终失败时返回默认结果
+
+结果: 成功率从85%提升至99%。
+
+---
+
+## 七、面试前的准备清单
 
 - [ ] 能画出系统架构图(4个Agent + Supervisor + Aggregator)
 - [ ] 能说清楚为什么用Multi-Agent而不是单Agent
@@ -514,3 +715,8 @@ services:
 - [ ] 能对比三个多Agent框架(LangGraph/CrewAI/AutoGen)
 - [ ] 跑通Python版demo,能现场演示
 - [ ] 读懂Go版代码,能解释goroutine并行模型
+- [ ] 能解释Java版BaseAgent的模板方法模式设计
+- [ ] 能说出Spring AI的BeanOutputConverter用法
+- [ ] 能对比CompletableFuture vs asyncio的异同
+- [ ] 能说出Java代码规范的核心要点(日志/注入/判空)
+- [ ] 能解释营销文案的广告法合规实现

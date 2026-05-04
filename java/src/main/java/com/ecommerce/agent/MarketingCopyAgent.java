@@ -2,7 +2,7 @@ package com.ecommerce.agent;
 
 import com.ecommerce.entity.Product;
 import com.ecommerce.model.AgentResult;
-import com.ecommerce.model.UserProfile;
+import com.ecommerce.entity.UserProfile;
 import com.ecommerce.service.ProductService;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;

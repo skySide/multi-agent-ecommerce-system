@@ -49,6 +49,11 @@ public class FavoriteController {
         String userId = body.get("userId");
         String productId = body.get("productId");
         boolean success = userFavoriteService.removeFavorite(userId, productId);
+        try {
+            userBehaviorService.recordBehavior(userId, productId, "unfavorite", null, "product_detail");
+        } catch (Exception e) {
+            log.warn("记录取消收藏行为失败: {}", e.getMessage());
+        }
         return Result.success(Map.of("success", success, "favorited", false));
     }
 

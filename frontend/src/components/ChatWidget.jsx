@@ -21,8 +21,13 @@ function ChatWidget() {
   const [inputValue, setInputValue] = useState('')
   const [loading, setLoading] = useState(false)
   const [sessionId, setSessionId] = useState(null)
-  const userId = localStorage.getItem('userId') || 'user123'
+  // 未登录时不展示对话入口，直接 return 不渲染任何东西
+  const userId = localStorage.getItem('userId') || null
+  const isLoggedIn = !!userId
   const messagesEndRef = useRef(null)
+
+  // 未登录：不渲染对话按钮和窗口
+  if (!isLoggedIn) return null
   const navigate = useNavigate()
 
   useEffect(() => {

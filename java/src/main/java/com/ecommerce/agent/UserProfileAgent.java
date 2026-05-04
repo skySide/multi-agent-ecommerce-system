@@ -62,7 +62,7 @@ public class UserProfileAgent extends BaseAgent {
 
         // 4. 解析并构建画像（结构化输出，无需手动parse JSON字符串）
         UserProfileAnalysisDTO analysis = converter.convert(response);
-        com.ecommerce.model.UserProfile profile = buildProfileFromDto(userId, analysis, behavior);
+        UserProfile profile = buildProfileFromDto(userId, analysis, behavior);
 
         // 5. 保存画像到数据库
         try {
@@ -158,7 +158,7 @@ public class UserProfileAgent extends BaseAgent {
     /**
      * 从结构化DTO构建 UserProfile 模型
      */
-    private com.ecommerce.model.UserProfile buildProfileFromDto(String userId, UserProfileAnalysisDTO dto, Map<String, Object> behavior) {
+    private UserProfile buildProfileFromDto(String userId, UserProfileAnalysisDTO dto, Map<String, Object> behavior) {
         if (dto == null) {
             return fallbackProfile(userId, behavior);
         }
@@ -167,22 +167,18 @@ public class UserProfileAgent extends BaseAgent {
             List<String> categories = dto.getPreferredCategories() != null ? dto.getPreferredCategories() : List.of();
             List<Double> priceRange = dto.getPriceRange() != null && dto.getPriceRange().size() >= 2
                     ? dto.getPriceRange() : List.of(0.0, 10000.0);
+            Map<String, Double> rfmScore = dto.getRfmScore();
 
-            // 从行为中提取最近浏览和购买
-            @SuppressWarnings("unchecked")
-            List<String> recentViews = (List<String>) behavior.getOrDefault("recent_views", List.of());
-            @SuppressWarnings("unchecked")
-            List<String> recentPurchases = (List<String>) behavior.getOrDefault("recent_purchases", List.of());
-
-            return com.ecommerce.model.UserProfile.builder()
+            return UserProfile.builder()
                     .userId(userId)
-                    .segments(segments)
-                    .preferredCategories(categories)
-                    .priceRange(new double[]{priceRange.get(0), priceRange.get(1)})
-                    .recentViews(recentViews)
-                    .recentPurchases(recentPurchases)
-                    .rfmScore(dto.getRfmScore())
-                    .realTimeTags(dto.getRealTimeTags())
+                    .segments(segments != null ? String.join(",", segments) : "active")
+                    .preferredCategories(categories != null ? String.join(",", categories) : "")
+                    .priceRangeMin(BigDecimal.valueOf(priceRange.get(0)))
+                    .priceRangeMax(BigDecimal.valueOf(priceRange.get(1)))
+                    .rfmRecency(rfmScore != null ? BigDecimal.valueOf(rfmScore.getOrDefault("recency", 0.5)) : BigDecimal.valueOf(0.5))
+                    .rfmFrequency(rfmScore != null ? BigDecimal.valueOf(rfmScore.getOrDefault("frequency", 0.5)) : BigDecimal.valueOf(0.5))
+                    .rfmMonetary(rfmScore != null ? BigDecimal.valueOf(rfmScore.getOrDefault("monetary", 0.5)) : BigDecimal.valueOf(0.5))
+                    .realTimeTags(dto.getRealTimeTags() != null ? dto.getRealTimeTags().toString() : "")
                     .build();
         } catch (Exception e) {
             log.warn("UserProfileAgent.buildProfileFromDto 构建失败 userId={}: {}", userId, e.getMessage());
@@ -190,37 +186,19 @@ public class UserProfileAgent extends BaseAgent {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private com.ecommerce.model.UserProfile fallbackProfile(String userId, Map<String, Object> behavior) {
-        return com.ecommerce.model.UserProfile.builder()
+    private UserProfile fallbackProfile(String userId, Map<String, Object> behavior) {
+        return UserProfile.builder()
                 .userId(userId)
-                .segments(List.of("active"))
-                .recentViews((List<String>) behavior.getOrDefault("recent_views", List.of()))
-                .recentPurchases((List<String>) behavior.getOrDefault("recent_purchases", List.of()))
+                .segments("active")
+                .preferredCategories("")
                 .build();
     }
 
     /**
      * 将画像保存到数据库
      */
-    private void saveProfileToDb(String userId, com.ecommerce.model.UserProfile profile, Map<String, Object> behavior) {
-        UserProfile entity = UserProfile.builder()
-                .userId(userId)
-                .segments(profile.getSegments() != null ? String.join(",", profile.getSegments()) : "active")
-                .preferredCategories(profile.getPreferredCategories() != null ? String.join(",", profile.getPreferredCategories()) : "")
-                .priceRangeMin(BigDecimal.valueOf(profile.getPriceRange()[0]))
-                .priceRangeMax(BigDecimal.valueOf(profile.getPriceRange()[1]))
-                .realTimeTags(profile.getRealTimeTags() != null ? profile.getRealTimeTags().toString() : "")
-                .build();
-
-        // 设置 RFM 分数
-        if (profile.getRfmScore() != null) {
-            entity.setRfmRecency(BigDecimal.valueOf(profile.getRfmScore().getOrDefault("recency", 0.5)));
-            entity.setRfmFrequency(BigDecimal.valueOf(profile.getRfmScore().getOrDefault("frequency", 0.5)));
-            entity.setRfmMonetary(BigDecimal.valueOf(profile.getRfmScore().getOrDefault("monetary", 0.5)));
-        }
-
-        userProfileService.saveOrUpdateProfile(entity);
+    private void saveProfileToDb(String userId, UserProfile profile, Map<String, Object> behavior) {
+        userProfileService.saveOrUpdateProfile(profile);
         log.info("UserProfileAgent.saveProfileToDb 用户画像已保存 userId={}", userId);
     }
 

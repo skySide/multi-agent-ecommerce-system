@@ -1,7 +1,7 @@
 package com.ecommerce.service.impl;
 
 import com.ecommerce.entity.Product;
-import com.ecommerce.model.UserProfile;
+import com.ecommerce.entity.UserProfile;
 import com.ecommerce.service.ProductService;
 import com.ecommerce.service.RecommendEngineService;
 import com.ecommerce.service.VectorStoreService;
@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.Arrays;
 
 /**
  * 推荐引擎核心服务实现。
@@ -151,7 +152,7 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
         if (profile == null || profile.getPreferredCategories() == null || profile.getPreferredCategories().isEmpty()) {
             return hotRecall(numItems);
         }
-        List<String> categoryNames = profile.getPreferredCategories();
+        List<String> categoryNames = Arrays.asList(profile.getPreferredCategories().split(","));
         List<Product> products = new ArrayList<>();
         for (String category : categoryNames) {
             List<Product> list = productService.searchByKeyword(category, numItems / categoryNames.size() + 1);
@@ -265,13 +266,7 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
         }
         StringBuilder sb = new StringBuilder();
         if (profile.getPreferredCategories() != null && !profile.getPreferredCategories().isEmpty()) {
-            sb.append(String.join(" ", profile.getPreferredCategories()));
-        }
-        if (profile.getRecentViews() != null && !profile.getRecentViews().isEmpty()) {
-            sb.append(" ").append(String.join(" ", profile.getRecentViews()));
-        }
-        if (profile.getRecentPurchases() != null && !profile.getRecentPurchases().isEmpty()) {
-            sb.append(" ").append(String.join(" ", profile.getRecentPurchases()));
+            sb.append(profile.getPreferredCategories().replace(",", " "));
         }
         return sb.length() > 0 ? sb.toString() : "热门商品推荐";
     }
@@ -284,12 +279,12 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
         if (profile == null) {
             return filters;
         }
-        if (profile.getPriceRange() != null && profile.getPriceRange().length >= 2) {
-            filters.put("price_gte", profile.getPriceRange()[0]);
-            filters.put("price_lte", profile.getPriceRange()[1]);
+        if (profile.getPriceRangeMin() != null && profile.getPriceRangeMax() != null) {
+            filters.put("price_gte", profile.getPriceRangeMin());
+            filters.put("price_lte", profile.getPriceRangeMax());
         }
         if (profile.getPreferredCategories() != null && !profile.getPreferredCategories().isEmpty()) {
-            filters.put("categoryName", profile.getPreferredCategories().get(0));
+            filters.put("categoryName", profile.getPreferredCategories().split(",")[0]);
         }
         return filters;
     }
@@ -396,21 +391,14 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
                     && profile.getPreferredCategories().contains(product.getCategoryName())) {
                 score += 20;
             }
-            if (profile.getPriceRange() != null && product.getPrice() != null) {
-                double min = profile.getPriceRange()[0];
-                double max = profile.getPriceRange()[1];
+            if (profile.getPriceRangeMin() != null && profile.getPriceRangeMax() != null && product.getPrice() != null) {
+                double min = profile.getPriceRangeMin().doubleValue();
+                double max = profile.getPriceRangeMax().doubleValue();
                 double price = product.getPrice().doubleValue();
                 if (price >= min && price <= max) {
                     score += 15;
                 } else if (price <= max * 1.2) {
                     score += 5;
-                }
-            }
-            if (profile.getRecentPurchases() != null && product.getBrand() != null) {
-                for (String item : profile.getRecentPurchases()) {
-                    if (item.contains(product.getBrand()) || product.getBrand().contains(item)) {
-                        score += 10;
-                    }
                 }
             }
         }
@@ -438,7 +426,8 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
                         "请输出商品ID数组（JSON格式），只输出ID数组，不要解释。",
                 numItems,
                 profile.getPreferredCategories(),
-                profile.getPriceRange()[0], profile.getPriceRange()[1],
+                profile.getPriceRangeMin() != null ? profile.getPriceRangeMin().doubleValue() : 0,
+                profile.getPriceRangeMax() != null ? profile.getPriceRangeMax().doubleValue() : 10000,
                 profile.getSegments(),
                 productList
         );
