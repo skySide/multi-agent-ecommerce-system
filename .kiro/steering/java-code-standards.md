@@ -5,6 +5,57 @@
 
 ---
 
+## 0. if 语句规范
+
+### 0.1 花括号强制要求
+**所有 if 语句必须加花括号 `{}`，即使只有一行代码。**
+
+```java
+// 正确示例
+if (user == null) {
+    return null;
+}
+
+if (list.isEmpty()) {
+    log.warn("ProductService.getList - 列表为空");
+    return Collections.emptyList();
+}
+
+// 错误示例
+if (user == null) return null;  // 缺少花括号
+
+if (list.isEmpty())
+    return Collections.emptyList();  // 缺少花括号
+```
+
+### 0.2 else 和 else if 同样要求
+`else` 和 `else if` 也必须加花括号：
+
+```java
+// 正确示例
+if (status == 1) {
+    return "激活";
+} else if (status == 0) {
+    return "未激活";
+} else {
+    return "未知";
+}
+
+// 错误示例
+if (status == 1)
+    return "激活";
+else
+    return "未激活";
+```
+
+### 0.3 原因
+- 避免"悬空 else"问题
+- 防止后续添加代码时忘记加花括号导致逻辑错误
+- 提高代码可读性和一致性
+- 符合主流 Java 编码规范（阿里巴巴、Google 等）
+
+---
+
 ## 1. 日志规范
 
 ### 1.1 日志格式要求

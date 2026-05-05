@@ -720,3 +720,409 @@ private Integer calcPurchaseLimit(Product product, int stock) {
 - [ ] 能对比CompletableFuture vs asyncio的异同
 - [ ] 能说出Java代码规范的核心要点(日志/注入/判空)
 - [ ] 能解释营销文案的广告法合规实现
+
+---
+
+## 七、Multi-Agent 交互方式详解
+
+### 7.1 整体架构：Supervisor 模式
+
+本项目采用 **Supervisor（主管）模式** 编排多个专业 Agent，核心思想是：
+
+```
+用户请求 → Supervisor（分发/聚合）→ 并行执行多个 Agent → 结果聚合 → 返回
+```
+
+**为什么选择 Supervisor 模式？**
+1. **流程可控**：推荐流程是确定性的（画像→推荐→文案→库存），Supervisor 可以精确控制执行顺序
+2. **易于监控**：所有 Agent 调用经过统一入口，便于日志、指标收集
+3. **降级友好**：某个 Agent 失败时，Supervisor 可以决定是否继续、如何补偿
+
+### 7.2 两阶段并行策略
+
+```
+Phase 1（并行）:
+┌─────────────────┐     ┌─────────────────┐
+│  UserProfile    │     │  ProductRec     │
+│  Agent          │     │  Agent          │
+│  (画像分析)      │     │  (多路召回)      │
+└────────┬────────┘     └────────┬────────┘
+         │                       │
+         └───────────┬───────────┘
+                     ↓
+Phase 2（并行）:
+┌─────────────────┐     ┌─────────────────┐
+│  LLM Rerank     │     │  Inventory      │
+│  (精排)         │     │  Agent          │
+│                 │     │  (库存校验)      │
+└────────┬────────┘     └────────┬────────┘
+         │                       │
+         └───────────┬───────────┘
+                     ↓
+Phase 3（串行）:
+┌─────────────────────────────────┐
+│  MarketingCopy Agent            │
+│  (文案生成，依赖前两步结果)        │
+└─────────────────────────────────┘
+```
+
+**并行优势**：
+- Phase 1：画像和召回无依赖，并行节省约 5s
+- Phase 2：重排和库存无依赖，并行节省约 5s
+- 总延迟 ≈ 最慢的 Agent，而非所有 Agent 之和
+
+### 7.3 Agent 之间的数据传递
+
+**方式一：通过 Supervisor 聚合**
+```java
+// SupervisorOrchestrator.java
+CompletableFuture<AgentResult> profileFuture = userProfileAgent.runAsync(params);
+CompletableFuture<AgentResult> recallFuture = productRecAgent.runAsync(params);
+
+CompletableFuture.allOf(profileFuture, recallFuture).join();
+
+// Phase 2 使用 Phase 1 的结果
+UserProfile profile = (UserProfile) profileFuture.get().getData().get("profile");
+List<Product> candidates = (List<Product>) recallFuture.get().getData().get("products");
+
+Map<String, Object> phase2Params = new HashMap<>();
+phase2Params.put("profile", profile);
+phase2Params.put("candidates", candidates);
+```
+
+**方式二：通过共享 Context**
+```java
+Map<String, Object> context = new HashMap<>();
+context.put("userId", userId);
+context.put("userQuery", message);  // Query 改写服务会读取
+
+// 所有 Agent 都可以访问 context
+RecommendEngineService.recommend(userId, profile, numItems, context);
+```
+
+### 7.4 Agent 决策冲突处理
+
+**场景**：推荐 Agent 推荐了高价商品，但库存 Agent 发现只剩 5 件。
+
+**解决策略**：
+1. **优先级规则**：库存安全 > 用户偏好 > 营销策略
+2. **过滤机制**：推荐结果必须经过库存 Agent 过滤，缺货商品直接移除
+3. **置信度加权**：每个 Agent 结果附带 confidence 分数，低置信度结果权重降低
+
+```java
+// Aggregator 中的过滤逻辑
+List<Product> filtered = rankedProducts.stream()
+    .filter(p -> inventoryResult.isAvailable(p.getProductId()))
+    .collect(Collectors.toList());
+```
+
+### 7.5 Query 改写服务：Agent 间的智能桥梁
+
+**问题**：用户输入"电脑"，但数据库类目是"笔记本"，传统关键词匹配无法召回。
+
+**解决方案**：QueryRewriteService 基于 LLM 进行智能改写。
+
+```
+用户输入: "帮我推荐几款电脑"
+        ↓
+QueryRewriteService.rewrite()
+        ↓
+{
+  "intent": "recommend",
+  "entities": {"category": "笔记本"},
+  "rewritten_query": "笔记本电脑 推荐 性价比",
+  "expanded_queries": ["笔记本 5000-6000元", "笔记本电脑 学生"]
+}
+        ↓
+RecommendEngineService 使用改写后的 query 进行向量召回
+```
+
+**核心代码**：
+```java
+// ConversationServiceImpl.handleRecommend()
+Map<String, Object> context = new HashMap<>(mergedEntities);
+context.put("userQuery", message);  // 传递用户原始查询
+
+// RecommendEngineServiceImpl.recommend()
+String userQuery = extractUserQuery(context);
+if (userQuery != null && !userQuery.isEmpty()) {
+    RewriteResultDTO rewriteResult = queryRewriteService.rewrite(userQuery, context);
+    // 将改写结果合并到 context
+    context.putAll(rewriteResult.getEntities());
+}
+```
+
+---
+
+## 八、智能会话记忆管理
+
+### 8.1 三层记忆架构
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                     记忆管理架构                            │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│  │  短期记忆     │  │  会话记忆     │  │  长期记忆     │     │
+│  │  (Redis)     │  │  (MySQL)     │  │  (MySQL)     │     │
+│  └──────────────┘  └──────────────┘  └──────────────┘     │
+│        ↓                  ↓                  ↓             │
+│   最近10轮对话      extracted_info       user_profile      │
+│   毫秒级读取        实体累积存储          RFM/偏好标签      │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+```
+
+### 8.2 短期记忆：对话历史
+
+**存储位置**：`conversation_session.dialogue_history`（JSON 格式）
+
+**数据结构**：
+```json
+[
+  "用户: 给我推荐几款手机",
+  "助手: 根据您的需求，我为您推荐以下手机...",
+  "用户: 预算在5000以内",
+  "助手: 好的，为您筛选了5000元以内的手机..."
+]
+```
+
+**用途**：
+- 多轮对话上下文
+- 意图识别辅助（指代消解，如"那换货呢"）
+- 生成回复时注入历史
+
+**滑动窗口**：保留最近 10 轮（20 条消息），超出则截断。
+
+### 8.3 会话记忆：实体累积
+
+**存储位置**：`conversation_session.extracted_info`（JSON 格式）
+
+**数据结构**：
+```json
+{
+  "category": "手机",
+  "brand": "华为",
+  "price_max": 5000,
+  "num_items": 5
+}
+```
+
+**累积策略**：每轮对话识别的实体，新值覆盖旧值，未提及的字段保留。
+
+```java
+// ConversationServiceImpl.mergeExtractedInfo()
+private Map<String, Object> mergeExtractedInfo(String existingJson, Map<String, Object> newEntities) {
+    Map<String, Object> existing = objectMapper.readValue(existingJson, Map.class);
+    existing.putAll(newEntities);  // 新值覆盖旧值
+    return existing;
+}
+```
+
+**跨轮次示例**：
+```
+第1轮: "推荐手机"           → {category: "手机"}
+第2轮: "预算5000以内"       → {category: "手机", price_max: 5000}
+第3轮: "华为的"             → {category: "手机", price_max: 5000, brand: "华为"}
+```
+
+### 8.4 长期记忆：用户画像
+
+**存储位置**：`user_profile` 表
+
+**字段**：
+- `preferred_categories`：偏好类目（如"手机,耳机,笔记本"）
+- `preferred_brands`：偏好品牌
+- `price_range_min/max`：价格偏好
+- `rfm_recency/frequency/monetary`：RFM 分数
+- `segments`：用户分群（如"high_value", "price_sensitive"）
+
+**更新时机**：
+1. **实时更新**：对话中识别的偏好，保存到 `conversation_profile_update` 记录表
+2. **批量同步**：定时任务将对话偏好合并到 `user_profile`
+
+**读取逻辑**：
+```java
+// ConversationServiceImpl.buildLongTermContext()
+private String buildLongTermContext(String userId) {
+    UserProfile profile = userProfileService.getByUserId(userId);
+    if (profile == null) {
+        return "";
+    }
+    StringBuilder sb = new StringBuilder("用户历史偏好：");
+    if (profile.getPreferredCategories() != null) {
+        sb.append("偏好类目=").append(profile.getPreferredCategories());
+    }
+    // ... 其他字段
+    return sb.toString();
+}
+```
+
+### 8.5 记忆在推荐流程中的应用
+
+```
+用户: "给我推荐几款手机"
+        ↓
+1. 读取会话记忆 (extracted_info)
+   → 当前无累积实体
+        ↓
+2. 读取长期记忆 (user_profile)
+   → 发现用户之前偏好"华为品牌"
+        ↓
+3. 构建推荐请求
+   context = {
+     userQuery: "给我推荐几款手机",
+     brand: "华为"  // 来自长期记忆
+   }
+        ↓
+4. Query 改写
+   → "华为手机 推荐"
+        ↓
+5. 多路召回 + 精排
+        ↓
+6. 保存对话历史 + 累积实体
+   extracted_info = {category: "手机", brand: "华为"}
+```
+
+### 8.6 记忆隔离与安全
+
+**会话隔离**：不同用户、不同会话的记忆完全隔离，通过 `userId` 和 `sessionId` 区分。
+
+**归属校验**：
+```java
+// ConversationServiceImpl.chat()
+if (!userId.equals(session.getUserId())) {
+    log.warn("会话归属校验失败: sessionId 属于 {}, 请求 userId={}",
+            session.getUserId(), userId);
+    sessionId = createSession(userId);  // 创建新会话
+}
+```
+
+---
+
+## 九、面试常见追问
+
+### Q41: 如果 LLM 改写失败怎么办？
+
+**答**：有三层降级策略：
+1. **QueryRewriteService 内部降级**：返回原始 query，不进行改写
+2. **RecommendEngineService 降级**：改写失败时使用画像偏好构建 query
+3. **召回兜底**：如果所有召回通道都失败，返回热门商品
+
+```java
+// 降级示例
+try {
+    RewriteResultDTO result = queryRewriteService.rewrite(userQuery, context);
+} catch (Exception e) {
+    log.warn("Query改写失败，使用原始query");
+    // 继续使用原始 userQuery
+}
+```
+
+### Q42: 会话记忆会不会无限增长？
+
+**答**：有滑动窗口限制：
+- 对话历史保留最近 10 轮（20 条消息）
+- 实体累积只保留当前会话，会话结束后可归档
+- 长期画像定期清理过期数据
+
+### Q43: 多个 Agent 并行时，一个失败了怎么办？
+
+**答**：每个 Agent 独立 try-catch，失败返回降级结果：
+
+```java
+// BaseAgent.runAsync()
+try {
+    return execute(params);
+} catch (Exception e) {
+    return fallback(latencyMs, e);  // 降级结果
+}
+```
+
+Supervisor 检查每个 Agent 的 `success` 标志，决定是否继续。
+
+### Q44: 如何评估 Query 改写的效果？
+
+**答**：通过 A/B 测试对比：
+- 对照组：不使用改写，直接用原始 query
+- 实验组：使用 LLM 改写
+
+**指标**：
+- 召回率提升（相关商品被召回的比例）
+- 用户满意度（点击率、转化率）
+- 长尾 query 覆盖率（能召回结果的 query 比例）
+
+### Q45: 多路召回如何结合用户查询条件？
+
+**答**：所有召回通道都会利用 Query 改写提取的实体进行过滤：
+
+```
+用户输入: "推荐几款5000以内的华为手机"
+            ↓
+Query 改写提取实体:
+{
+  "category": "手机",
+  "brand": "华为", 
+  "price_max": 5000
+}
+            ↓
+各召回通道应用过滤条件：
+
+1. 向量召回：使用改写后的 query "华为手机 推荐" 进行向量检索
+
+2. 热门召回：
+   - 获取热门商品（多取 3 倍）
+   - 过滤：category="手机" AND brand="华为" AND price<=5000
+   - 若过滤后为空，降级返回热门商品
+
+3. 新品召回：
+   - 获取新品商品（多取 3 倍）
+   - 过滤：category="手机" AND brand="华为" AND price<=5000
+   - 若过滤后为空，降级返回新品
+
+4. 类目召回：
+   - 使用查询中的类目 "手机" 进行搜索
+   - 过滤：brand="华为" AND price<=5000
+```
+
+**核心代码**：
+```java
+// 热门召回带过滤
+private List<Product> hotRecallWithFilters(int numItems, String category, String brand,
+                                             BigDecimal priceMin, BigDecimal priceMax) {
+    List<Product> hotProducts = productService.listHotProducts(numItems * 3);
+    
+    return hotProducts.stream()
+        .filter(p -> matchesCategory(p, category))
+        .filter(p -> matchesBrand(p, brand))
+        .filter(p -> matchesPrice(p, priceMin, priceMax))
+        .limit(numItems)
+        .collect(Collectors.toList());
+}
+```
+
+**降级策略**：如果过滤后结果为空，降级返回原始热门/新品商品，避免无结果返回。
+
+---
+
+## 十、面试前准备清单（更新版）
+
+- [ ] 能画出系统架构图(4个Agent + Supervisor + Aggregator)
+- [ ] 能说清楚为什么用Multi-Agent而不是单Agent
+- [ ] 能解释并行+聚合的两阶段策略
+- [ ] 能说出A/B测试的分桶算法(MD5哈希取模)
+- [ ] 能说出Thompson Sampling的原理(Beta分布采样)
+- [ ] 能说出3个稳定性保障手段(重试/超时/降级)
+- [ ] 能解释实时特征的Redis数据结构选型
+- [ ] 能对比三个多Agent框架(LangGraph/CrewAI/AutoGen)
+- [ ] 跑通Java版demo,能现场演示
+- [ ] 能解释BaseAgent的模板方法模式设计
+- [ ] 能说出Spring AI的BeanOutputConverter用法
+- [ ] 能对比CompletableFuture vs asyncio的异同
+- [ ] 能说出Java代码规范的核心要点(日志/注入/判空/if花括号)
+- [ ] 能解释营销文案的广告法合规实现
+- [ ] **能解释 Query 改写服务的原理和降级策略**
+- [ ] **能画出三层记忆架构图(短期/会话/长期)**
+- [ ] **能解释 Agent 之间的数据传递方式**
+- [ ] **能说出会话记忆的累积策略**

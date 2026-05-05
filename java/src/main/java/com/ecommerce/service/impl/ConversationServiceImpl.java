@@ -155,17 +155,22 @@ public class ConversationServiceImpl implements ConversationService {
         // 读取会话记忆（extracted_info），合并跨轮次累积的实体
         Map<String, Object> mergedEntities = mergeWithSessionMemory(sessionId, entities);
 
+        // 将用户原始消息添加到 context，用于 Query 改写
+        Map<String, Object> context = new HashMap<>(mergedEntities);
+        context.put("userQuery", message);
+        context.put("history", history);
+
         // 构建用户画像（从合并后实体中提取偏好）
         UserProfile profile = buildProfileFromEntities(userId, mergedEntities);
 
         // 注入长期记忆：读取 user_profile 历史偏好
         String longTermContext = buildLongTermContext(userId);
 
-        // 调用推荐引擎
+        // 调用推荐引擎（传入包含用户原始查询的 context）
         int numItems = mergedEntities.get("num_items") instanceof Number
                 ? ((Number) mergedEntities.get("num_items")).intValue() : 6;
         List<com.ecommerce.entity.Product> recProducts = recommendEngineService.recommend(
-                userId, profile, numItems, mergedEntities);
+                userId, profile, numItems, context);
 
         // 转换为 model.Product
         List<Product> modelProducts = recProducts.stream()

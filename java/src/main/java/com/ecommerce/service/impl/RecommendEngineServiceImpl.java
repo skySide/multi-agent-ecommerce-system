@@ -1,8 +1,10 @@
 package com.ecommerce.service.impl;
 
+import com.ecommerce.dto.RewriteResultDTO;
 import com.ecommerce.entity.Product;
 import com.ecommerce.entity.UserProfile;
 import com.ecommerce.service.ProductService;
+import com.ecommerce.service.QueryRewriteService;
 import com.ecommerce.service.RecommendEngineService;
 import com.ecommerce.service.VectorStoreService;
 import jakarta.annotation.Resource;
@@ -11,13 +13,13 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.stream.Collectors;
-import java.util.Arrays;
 
 /**
  * 推荐引擎核心服务实现。
- * <p>流程：多路召回 -> RRF融合 -> 重排 -> 多样性控制。</p>
+ * <p>流程：Query改写 -> 多路召回 -> RRF融合 -> 重排 -> 多样性控制。</p>
  */
 @Slf4j
 @Service
@@ -29,19 +31,21 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
     private ProductService productService;
     @Resource
     private ChatClient chatClient;
+    @Resource
+    private QueryRewriteService queryRewriteService;
 
-    // 召回通道权重
+    /** 召回通道权重 */
     private static final double VECTOR_RECALL_WEIGHT = 0.4;
     private static final double HOT_RECALL_WEIGHT = 0.2;
     private static final double NEW_RECALL_WEIGHT = 0.2;
     private static final double CATEGORY_RECALL_WEIGHT = 0.2;
 
-    // 各通道召回数量系数
+    /** 各通道召回数量系数 */
     private static final int RECALL_FACTOR = 3;
-    // RRF 融合常量（越大越平滑）
+    /** RRF 融合常量（越大越平滑） */
     private static final int RRF_K = 60;
 
-    // 固定通道权重，避免每次调用重复创建对象
+    /** 固定通道权重，避免每次调用重复创建对象 */
     private static final Map<String, Double> CHANNEL_WEIGHTS = Map.of(
             "vector", VECTOR_RECALL_WEIGHT,
             "hot", HOT_RECALL_WEIGHT,
@@ -49,7 +53,7 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
             "category", CATEGORY_RECALL_WEIGHT
     );
 
-    // 固定比较器，避免每次调用重复创建对象
+    /** 固定比较器，避免每次调用重复创建对象 */
     private static final Comparator<Product> BY_ID =
             Comparator.comparing(p -> p.getProductId() == null ? "" : p.getProductId());
     private static final Comparator<Product> BY_SALES_DESC =
@@ -60,6 +64,7 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
     /**
      * 多路召回主入口。
      * <p>步骤：四路召回 -> 通道内稳定排序 -> RRF融合。</p>
+     * <p>所有召回通道都会结合用户查询条件（如有）进行过滤。</p>
      */
     @Override
     public Map<String, List<Product>> multiChannelRecall(String userId, UserProfile profile, int numItems, Map<String, Object> context) {
@@ -67,32 +72,53 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
         Map<String, List<Product>> result = new HashMap<>();
         int recallNum = numItems * RECALL_FACTOR;
 
+        // 从 context 提取改写后的查询信息
+        String rewrittenQuery = context != null ? (String) context.get("rewritten_query") : null;
+        String queryCategory = extractCategoryFromContext(context);
+        String queryBrand = extractBrandFromContext(context);
+        BigDecimal queryPriceMin = extractPriceFromContext(context, "price_min");
+        BigDecimal queryPriceMax = extractPriceFromContext(context, "price_max");
+
+        log.info("RecommendEngineServiceImpl.multiChannelRecall 查询条件: category={}, brand={}, price={}~{}",
+                queryCategory, queryBrand, queryPriceMin, queryPriceMax);
+
+        // 1. 向量召回：使用改写后的 query
         try {
             List<Product> vectorProducts = vectorRecall(userId, profile, (int) (recallNum * VECTOR_RECALL_WEIGHT));
+            // 向量召回已经使用改写后的 query，无需再过滤
             result.put("vector", sortForChannel("vector", vectorProducts, profile));
         } catch (Exception e) {
             log.warn("RecommendEngineServiceImpl.multiChannelRecall 向量召回失败: {}", e.getMessage());
             result.put("vector", List.of());
         }
 
+        // 2. 热门召回：结合用户查询条件过滤
         try {
-            List<Product> hotProducts = hotRecall((int) (recallNum * HOT_RECALL_WEIGHT));
+            List<Product> hotProducts = hotRecallWithFilters(
+                    (int) (recallNum * HOT_RECALL_WEIGHT),
+                    queryCategory, queryBrand, queryPriceMin, queryPriceMax);
             result.put("hot", sortForChannel("hot", hotProducts, profile));
         } catch (Exception e) {
             log.warn("RecommendEngineServiceImpl.multiChannelRecall 热门召回失败: {}", e.getMessage());
             result.put("hot", List.of());
         }
 
+        // 3. 新品召回：结合用户查询条件过滤
         try {
-            List<Product> newProducts = newArrivalRecall((int) (recallNum * NEW_RECALL_WEIGHT));
+            List<Product> newProducts = newArrivalRecallWithFilters(
+                    (int) (recallNum * NEW_RECALL_WEIGHT),
+                    queryCategory, queryBrand, queryPriceMin, queryPriceMax);
             result.put("new", sortForChannel("new", newProducts, profile));
         } catch (Exception e) {
             log.warn("RecommendEngineServiceImpl.multiChannelRecall 新品召回失败: {}", e.getMessage());
             result.put("new", List.of());
         }
 
+        // 4. 类目召回：优先使用查询中的类目，否则使用画像偏好
         try {
-            List<Product> categoryProducts = categoryRecall(profile, (int) (recallNum * CATEGORY_RECALL_WEIGHT));
+            List<Product> categoryProducts = categoryRecallWithQuery(
+                    profile, (int) (recallNum * CATEGORY_RECALL_WEIGHT),
+                    queryCategory, queryBrand, queryPriceMin, queryPriceMax);
             result.put("category", sortForChannel("category", categoryProducts, profile));
         } catch (Exception e) {
             log.warn("RecommendEngineServiceImpl.multiChannelRecall 类目召回失败: {}", e.getMessage());
@@ -106,12 +132,192 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
     }
 
     /**
+     * 从 context 中提取类目
+     */
+    private String extractCategoryFromContext(Map<String, Object> context) {
+        if (context == null) {
+            return null;
+        }
+        Object category = context.get("category");
+        if (category == null) {
+            category = context.get("categories");
+        }
+        if (category instanceof String) {
+            return (String) category;
+        }
+        return null;
+    }
+
+    /**
+     * 从 context 中提取品牌
+     */
+    private String extractBrandFromContext(Map<String, Object> context) {
+        if (context == null) {
+            return null;
+        }
+        Object brand = context.get("brand");
+        if (brand == null) {
+            brand = context.get("brands");
+        }
+        if (brand instanceof String) {
+            return (String) brand;
+        }
+        return null;
+    }
+
+    /**
+     * 从 context 中提取价格
+     */
+    private BigDecimal extractPriceFromContext(Map<String, Object> context, String key) {
+        if (context == null) {
+            return null;
+        }
+        Object price = context.get(key);
+        if (price instanceof Number) {
+            return BigDecimal.valueOf(((Number) price).doubleValue());
+        }
+        return null;
+    }
+
+    /**
+     * 热门召回（带过滤条件）
+     */
+    private List<Product> hotRecallWithFilters(int numItems, String category, String brand,
+                                                 BigDecimal priceMin, BigDecimal priceMax) {
+        // 先获取热门商品（多取一些用于过滤）
+        List<Product> hotProducts = productService.listHotProducts(numItems * 3);
+
+        // 根据用户查询条件过滤
+        List<Product> filtered = hotProducts.stream()
+                .filter(p -> matchesCategory(p, category))
+                .filter(p -> matchesBrand(p, brand))
+                .filter(p -> matchesPrice(p, priceMin, priceMax))
+                .limit(numItems)
+                .collect(Collectors.toList());
+
+        log.info("RecommendEngineServiceImpl.hotRecallWithFilters 热门召回: 原始{}条 → 过滤后{}条",
+                hotProducts.size(), filtered.size());
+
+        // 如果过滤后为空，降级返回热门商品（不过滤）
+        if (filtered.isEmpty() && (category != null || brand != null || priceMin != null)) {
+            log.warn("RecommendEngineServiceImpl.hotRecallWithFilters 过滤后为空，降级返回热门商品");
+            return hotProducts.stream().limit(numItems).collect(Collectors.toList());
+        }
+
+        return filtered;
+    }
+
+    /**
+     * 新品召回（带过滤条件）
+     */
+    private List<Product> newArrivalRecallWithFilters(int numItems, String category, String brand,
+                                                        BigDecimal priceMin, BigDecimal priceMax) {
+        List<Product> newProducts = productService.listNewArrivals(numItems * 3);
+
+        List<Product> filtered = newProducts.stream()
+                .filter(p -> matchesCategory(p, category))
+                .filter(p -> matchesBrand(p, brand))
+                .filter(p -> matchesPrice(p, priceMin, priceMax))
+                .limit(numItems)
+                .collect(Collectors.toList());
+
+        log.info("RecommendEngineServiceImpl.newArrivalRecallWithFilters 新品召回: 原始{}条 → 过滤后{}条",
+                newProducts.size(), filtered.size());
+
+        if (filtered.isEmpty() && (category != null || brand != null || priceMin != null)) {
+            log.warn("RecommendEngineServiceImpl.newArrivalRecallWithFilters 过滤后为空，降级返回新品");
+            return newProducts.stream().limit(numItems).collect(Collectors.toList());
+        }
+
+        return filtered;
+    }
+
+    /**
+     * 类目召回（结合用户查询）
+     */
+    private List<Product> categoryRecallWithQuery(UserProfile profile, int numItems,
+                                                    String queryCategory, String queryBrand,
+                                                    BigDecimal priceMin, BigDecimal priceMax) {
+        // 优先使用用户查询中的类目，否则使用画像偏好
+        String targetCategory = queryCategory;
+        if (targetCategory == null && profile != null && profile.getPreferredCategories() != null) {
+            targetCategory = profile.getPreferredCategories().split(",")[0];
+        }
+
+        if (targetCategory == null || targetCategory.isEmpty()) {
+            // 无类目偏好，返回热门
+            return hotRecallWithFilters(numItems, null, queryBrand, priceMin, priceMax);
+        }
+
+        // 使用类目搜索
+        List<Product> products = productService.searchByKeyword(targetCategory, numItems * 2);
+
+        // 额外过滤品牌和价格
+        List<Product> filtered = products.stream()
+                .filter(p -> matchesBrand(p, queryBrand))
+                .filter(p -> matchesPrice(p, priceMin, priceMax))
+                .limit(numItems)
+                .collect(Collectors.toList());
+
+        log.info("RecommendEngineServiceImpl.categoryRecallWithQuery 类目召回: 类目={}, 原始{}条 → 过滤后{}条",
+                targetCategory, products.size(), filtered.size());
+
+        return filtered;
+    }
+
+    /**
+     * 判断商品是否匹配类目
+     */
+    private boolean matchesCategory(Product product, String category) {
+        if (category == null || category.isEmpty()) {
+            return true;
+        }
+        if (product.getCategoryName() == null) {
+            return false;
+        }
+        // 支持部分匹配：用户说"电脑"可以匹配"笔记本"
+        return product.getCategoryName().contains(category) || category.contains(product.getCategoryName());
+    }
+
+    /**
+     * 判断商品是否匹配品牌
+     */
+    private boolean matchesBrand(Product product, String brand) {
+        if (brand == null || brand.isEmpty()) {
+            return true;
+        }
+        if (product.getBrand() == null) {
+            return false;
+        }
+        return product.getBrand().equalsIgnoreCase(brand);
+    }
+
+    /**
+     * 判断商品是否匹配价格区间
+     */
+    private boolean matchesPrice(Product product, BigDecimal priceMin, BigDecimal priceMax) {
+        if (priceMin == null && priceMax == null) {
+            return true;
+        }
+        if (product.getPrice() == null) {
+            return false;
+        }
+        double price = product.getPrice().doubleValue();
+        if (priceMin != null && price < priceMin.doubleValue()) {
+            return false;
+        }
+        if (priceMax != null && price > priceMax.doubleValue()) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * 向量召回通道：query构建、metadata过滤、回表并按向量顺序重排。
-     * 需要重新排序的目的，是因为查询数据库的数据， 和向量召回的顺序有可能不一样，而向量召回的数据
-     * 已经按照相似度进行排序了， 因此需要查询数据库之后，还需要再进行排序
-     *
-     * 之所以要查询数据库，是因为可能我们数据库变更之后，没有那么快同步到向量数据库中，因此
-     * 需要再次查询数据库，从而得到准确的数据，降低幻觉
+     * 需要重新排序的目的，是因为查询数据库的数据，和向量召回的顺序有可能不一样，
+     * 而向量召回的数据已经按照相似度进行排序了，因此需要查询数据库之后，还需要再进行排序。
+     * 之所以要查询数据库，是因为可能我们数据库变更之后，没有那么快同步到向量数据库中，
+     * 因此需要再次查询数据库，从而得到准确的数据，降低幻觉。
      */
     @Override
     public List<Product> vectorRecall(String userId, UserProfile profile, int numItems) {
@@ -124,7 +330,10 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
         List<String> productIds = docs.stream()
                 .map(doc -> {
                     Object id = doc.getMetadata().get("productId");
-                    return id != null ? id.toString() : null;
+                    if (id != null) {
+                        return id.toString();
+                    }
+                    return null;
                 })
                 .filter(Objects::nonNull)
                 .distinct()
@@ -236,21 +445,56 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
     }
 
     /**
-     * 推荐主流程（保留轻量 trace）。
-     * <p>按你的要求：重点通过日志输出“重排前多路召回结果”和“重排后结果”。</p>
+     * 推荐主流程。
+     * <p>步骤：Query改写 -> 多路召回 -> 精排 -> 多样性控制。</p>
+     * <p>支持基于用户原始查询进行智能改写，提升召回精准度。</p>
      */
     @Override
     public List<Product> recommend(String userId, UserProfile profile, int numItems, Map<String, Object> context) {
+        log.info("RecommendEngineServiceImpl.recommend 用户={} 开始推荐流程", userId);
+
+        // 1. 从 context 中获取用户原始查询，进行智能改写
+        String userQuery = extractUserQuery(context);
+        if (userQuery != null && !userQuery.isEmpty()) {
+            try {
+                // 使用 LLM 改写 query，获取意图和实体
+                RewriteResultDTO rewriteResult = queryRewriteService.rewrite(userQuery, context);
+                log.info("RecommendEngineServiceImpl.recommend query改写: {} → {} intent={}",
+                        userQuery, rewriteResult.getRewrittenQuery(), rewriteResult.getIntent());
+
+                // 将改写结果合并到 context，供后续召回使用
+                if (context != null) {
+                    if (rewriteResult.getEntities() != null) {
+                        context.putAll(rewriteResult.getEntities());
+                    }
+                    // 保存改写后的 query，供向量召回使用
+                    if (rewriteResult.getRewrittenQuery() != null) {
+                        context.put("rewritten_query", rewriteResult.getRewrittenQuery());
+                    }
+                }
+
+                // 如果识别出特定意图，更新画像偏好
+                profile = enrichProfileFromRewrite(profile, rewriteResult);
+            } catch (Exception e) {
+                log.warn("RecommendEngineServiceImpl.recommend query改写失败: {}", e.getMessage());
+            }
+        }
+
+        // 2. 多路召回
         Map<String, List<Product>> recallResult = multiChannelRecall(userId, profile, numItems * 3, context);
         List<Product> candidates = recallResult.getOrDefault("merged", List.of());
         if (candidates.isEmpty()) {
             candidates = hotRecall(numItems);
         }
 
+        // 3. 记录召回快照
         logRecallSnapshot(userId, recallResult);
+
+        // 4. 精排
         List<Product> ranked = rerank(candidates, profile, numItems * 2);
         log.info("RecommendEngineServiceImpl.recommend user={} 重排后ID={}", userId, toIdList(ranked));
 
+        // 5. 多样性控制
         List<Product> diverse = applyDiversity(ranked, numItems, 0.5);
         log.info("RecommendEngineServiceImpl.recommend user={} 最终推荐ID={}", userId, toIdList(diverse));
 
@@ -258,17 +502,124 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
     }
 
     /**
-     * 将用户画像字段拼接为向量检索query。
+     * 从 context 中提取用户原始查询
+     */
+    private String extractUserQuery(Map<String, Object> context) {
+        if (context == null) {
+            return null;
+        }
+        Object query = context.get("userQuery");
+        if (query == null) {
+            query = context.get("query");
+        }
+        if (query == null) {
+            query = context.get("message");
+        }
+        if (query != null) {
+            return query.toString();
+        }
+        return null;
+    }
+
+    /**
+     * 基于改写结果丰富用户画像
+     */
+    private UserProfile enrichProfileFromRewrite(UserProfile profile, RewriteResultDTO rewriteResult) {
+        if (rewriteResult == null || rewriteResult.getEntities() == null) {
+            return profile;
+        }
+
+        Map<String, Object> entities = rewriteResult.getEntities();
+
+        // 如果 profile 为空，创建一个临时画像
+        if (profile == null) {
+            profile = UserProfile.builder()
+                    .userId("temp")
+                    .build();
+        }
+
+        // 从实体中更新偏好
+        if (entities.get("category") instanceof String) {
+            profile.setPreferredCategories((String) entities.get("category"));
+        }
+        if (entities.get("brand") instanceof String) {
+            profile.setPreferredBrands((String) entities.get("brand"));
+        }
+        if (entities.get("price_min") instanceof Number) {
+            BigDecimal priceMin = BigDecimal.valueOf(((Number) entities.get("price_min")).doubleValue());
+            profile.setPriceRangeMin(priceMin);
+        }
+        if (entities.get("price_max") instanceof Number) {
+            BigDecimal priceMax = BigDecimal.valueOf(((Number) entities.get("price_max")).doubleValue());
+            profile.setPriceRangeMax(priceMax);
+        }
+
+        return profile;
+    }
+
+    /**
+     * 将用户画像字段拼接为向量检索 query。
+     * <p>优先使用 LLM 进行智能改写，失败时降级为简单拼接。</p>
      */
     private String buildQueryFromProfile(UserProfile profile) {
         if (profile == null) {
             return "热门商品推荐";
         }
-        StringBuilder sb = new StringBuilder();
-        if (profile.getPreferredCategories() != null && !profile.getPreferredCategories().isEmpty()) {
-            sb.append(profile.getPreferredCategories().replace(",", " "));
+
+        // 从画像中提取偏好信息
+        String categories = profile.getPreferredCategories();
+        String brands = profile.getPreferredBrands();
+        String priceRange = null;
+        if (profile.getPriceRangeMin() != null && profile.getPriceRangeMax() != null) {
+            priceRange = String.format("%.0f-%.0f元",
+                    profile.getPriceRangeMin().doubleValue(),
+                    profile.getPriceRangeMax().doubleValue());
         }
-        return sb.length() > 0 ? sb.toString() : "热门商品推荐";
+
+        // 如果没有偏好信息，返回默认
+        if ((categories == null || categories.isEmpty()) && (brands == null || brands.isEmpty())) {
+            return "热门商品推荐";
+        }
+
+        // 构建原始 query
+        StringBuilder rawQuery = new StringBuilder();
+        if (categories != null && !categories.isEmpty()) {
+            rawQuery.append(categories.replace(",", " "));
+        }
+        if (brands != null && !brands.isEmpty()) {
+            if (rawQuery.length() > 0) {
+                rawQuery.append(" ");
+            }
+            rawQuery.append(brands.replace(",", " "));
+        }
+        if (priceRange != null) {
+            rawQuery.append(" ").append(priceRange);
+        }
+
+        // 使用 LLM 改写 query（带降级）
+        try {
+            Map<String, Object> profileMap = new HashMap<>();
+            profileMap.put("categories", categories);
+            profileMap.put("brands", brands);
+            profileMap.put("priceRange", priceRange);
+
+            String rewritten = queryRewriteService.toVectorQuery(rawQuery.toString(), profileMap);
+            if (rewritten != null && !rewritten.isEmpty()) {
+                log.info("RecommendEngineServiceImpl.buildQueryFromProfile query改写: {} → {}",
+                        rawQuery, rewritten);
+                return rewritten;
+            }
+        } catch (Exception e) {
+            log.warn("RecommendEngineServiceImpl.buildQueryFromProfile LLM改写失败，使用原始query: {}",
+                    e.getMessage());
+        }
+
+        // 降级：直接返回原始 query
+        if (rawQuery.length() > 0) {
+            return rawQuery.toString();
+        } else {
+            return "热门商品推荐";
+        }
     }
 
     /**
@@ -360,7 +711,11 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
      */
     private List<Product> reorderByIds(List<Product> products, List<String> orderedIds) {
         if (products == null || products.isEmpty() || orderedIds == null || orderedIds.isEmpty()) {
-            return products == null ? List.of() : products;
+            if (products == null) {
+                return List.of();
+            } else {
+                return products;
+            }
         }
         Map<String, Product> map = products.stream()
                 .filter(p -> p != null && p.getProductId() != null)
@@ -464,9 +819,9 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
     private List<String> parseIdList(String raw) {
         List<String> result = new ArrayList<>();
         try {
-            raw = raw.trim();
-            if (raw.startsWith("[") && raw.endsWith("]")) {
-                String content = raw.substring(1, raw.length() - 1);
+            String trimmed = raw.trim();
+            if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+                String content = trimmed.substring(1, trimmed.length() - 1);
                 for (String part : content.split(",")) {
                     String id = part.trim().replace("\"", "").replace("'", "");
                     if (!id.isEmpty()) {
@@ -474,7 +829,7 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
                     }
                 }
             } else {
-                for (String line : raw.split("\n")) {
+                for (String line : trimmed.split("\n")) {
                     String id = line.trim().replace("\"", "").replace("'", "").replace(",", "");
                     if (!id.isEmpty()) {
                         result.add(id);

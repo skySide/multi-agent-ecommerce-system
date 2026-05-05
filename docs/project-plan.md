@@ -118,24 +118,7 @@ graph TB
 
 ---
 
-## 三、三语言实现方案
-
-### 3.1 Python版（推荐入门，代码量最少）
-
-- **框架**：LangGraph + LangChain
-- **LLM**：MiniMax M2.7（通过OpenAI兼容接口）
-- **存储**：Redis（特征）+ Milvus（向量）+ SQLite（业务数据）
-- **Web**：FastAPI
-- **核心文件结构**：
-  - `agents/user_profile_agent.py` - 用户画像Agent
-  - `agents/product_rec_agent.py` - 商品推荐Agent
-  - `agents/marketing_copy_agent.py` - 营销文案Agent
-  - `agents/inventory_agent.py` - 库存决策Agent
-  - `orchestrator/supervisor.py` - Supervisor编排器
-  - `services/ab_test.py` - A/B测试引擎
-  - `services/feature_store.py` - 实时特征服务
-
-### 3.2 Java版（企业级，Spring生态）
+## 三、实现方案
 
 - **框架**：Spring AI Alibaba + Spring Boot 3
 - **LLM**：MiniMax M2.7
@@ -145,18 +128,6 @@ graph TB
   - `orchestrator/` - Supervisor编排（Tool Calling模式）
   - `service/` - 业务服务层
   - `config/` - MCP服务器配置
-
-### 3.3 Go版（高并发，云原生）
-
-- **框架**：LangChainGo + 自研编排层
-- **LLM**：MiniMax M2.7
-- **存储**：Redis + Milvus + PostgreSQL
-- **亮点**：goroutine并行Agent调用，channel聚合结果
-- **核心模块**：
-  - `agent/` - 四个Agent（接口+实现）
-  - `orchestrator/` - 基于goroutine的并行编排
-  - `handler/` - HTTP Handler
-  - `middleware/` - A/B测试中间件
 
 ---
 
@@ -171,7 +142,7 @@ graph TB
 - 基于Redis实现实时用户特征工程（RFM模型+行为序列），特征更新延迟<100ms
 - 集成MiniMax M2.7实现个性化营销文案生成，基于用户画像动态切换Prompt模板
 - 设计流量分桶A/B测试引擎，支持Agent级别策略对比，推荐CTR提升15%
-- 技术栈：Python/LangGraph | Java/Spring AI Alibaba | Go/LangChainGo
+- 技术栈：Java/Spring AI Alibaba
 ```
 
 ### 4.2 STAR法面试话术
@@ -249,23 +220,10 @@ multi-agent-ecommerce/
 │   ├── interview-guide.md    # 面试指南（STAR法+八股文）
 │   ├── resume-template.md    # 简历模板
 │   └── ab-testing.md         # A/B测试设计文档
-├── python/                   # Python实现
-│   ├── requirements.txt
-│   ├── main.py
-│   ├── agents/
-│   ├── orchestrator/
-│   ├── services/
-│   └── tests/
 ├── java/                     # Java实现
 │   ├── pom.xml
 │   ├── src/main/java/
 │   └── src/test/java/
-├── go/                       # Go实现
-│   ├── go.mod
-│   ├── cmd/
-│   ├── agent/
-│   ├── orchestrator/
-│   └── handler/
 └── docker-compose.yml        # 一键启动（Redis+Milvus+MySQL）
 ```
 
