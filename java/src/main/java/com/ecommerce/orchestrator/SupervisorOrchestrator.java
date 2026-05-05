@@ -1,9 +1,9 @@
 package com.ecommerce.orchestrator;
 
 import com.ecommerce.agent.*;
+import com.ecommerce.entity.Product;
 import com.ecommerce.entity.UserProfile;
 import com.ecommerce.model.AgentResult;
-import com.ecommerce.model.Product;
 import com.ecommerce.model.RecommendationRequest;
 import com.ecommerce.model.RecommendationResponse;
 import com.ecommerce.service.ABTestService;

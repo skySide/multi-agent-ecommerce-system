@@ -18,7 +18,8 @@ public class RecommendationResponse {
 
     private String userId;
 
-    private List<Product> products;
+    /** 推荐商品列表（使用 entity.Product 以包含完整字段如 mainImage） */
+    private List<com.ecommerce.entity.Product> products;
 
     private List<Map<String, String>> marketingCopies;
 

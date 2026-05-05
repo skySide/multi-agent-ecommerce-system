@@ -1,8 +1,11 @@
 package com.ecommerce.service.impl;
 
+import com.baomidou.mybatisplus.core.toolkit.StringUtils;
+import com.ecommerce.common.enums.ErrorCode;
 import com.ecommerce.dto.RewriteResultDTO;
 import com.ecommerce.entity.Product;
 import com.ecommerce.entity.UserProfile;
+import com.ecommerce.exception.BusinessException;
 import com.ecommerce.service.ProductService;
 import com.ecommerce.service.QueryRewriteService;
 import com.ecommerce.service.RecommendEngineService;
@@ -12,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
 import org.springframework.stereotype.Service;
+import org.springframework.util.CollectionUtils;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -67,13 +71,14 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
      * <p>所有召回通道都会结合用户查询条件（如有）进行过滤。</p>
      */
     @Override
-    public Map<String, List<Product>> multiChannelRecall(String userId, UserProfile profile, int numItems, Map<String, Object> context) {
-        log.info("RecommendEngineServiceImpl.multiChannelRecall 用户={} 开始多路召回", userId);
+    public Map<String, List<Product>> multiChannelRecall(UserProfile profile, int numItems, Map<String, Object> context) {
+        log.info("RecommendEngineServiceImpl.multiChannelRecall begin, profile = {}, numItems = {}, context = {}",
+                profile, numItems, context);
         Map<String, List<Product>> result = new HashMap<>();
         int recallNum = numItems * RECALL_FACTOR;
 
         // 从 context 提取改写后的查询信息
-        String rewrittenQuery = context != null ? (String) context.get("rewritten_query") : null;
+        String query = extractQueryFromContext(context);
         String queryCategory = extractCategoryFromContext(context);
         String queryBrand = extractBrandFromContext(context);
         BigDecimal queryPriceMin = extractPriceFromContext(context, "price_min");
@@ -84,11 +89,12 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
 
         // 1. 向量召回：使用改写后的 query
         try {
-            List<Product> vectorProducts = vectorRecall(userId, profile, (int) (recallNum * VECTOR_RECALL_WEIGHT));
+            List<Product> vectorProducts = vectorRecall(query, profile, (int) (recallNum * VECTOR_RECALL_WEIGHT));
             // 向量召回已经使用改写后的 query，无需再过滤
             result.put("vector", sortForChannel("vector", vectorProducts, profile));
         } catch (Exception e) {
-            log.warn("RecommendEngineServiceImpl.multiChannelRecall 向量召回失败: {}", e.getMessage());
+            log.error("RecommendEngineService.multiChannelRecall 向量召回失败: profile = {}, context = {}",
+                    profile, context, e);
             result.put("vector", List.of());
         }
 
@@ -99,7 +105,8 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
                     queryCategory, queryBrand, queryPriceMin, queryPriceMax);
             result.put("hot", sortForChannel("hot", hotProducts, profile));
         } catch (Exception e) {
-            log.warn("RecommendEngineServiceImpl.multiChannelRecall 热门召回失败: {}", e.getMessage());
+            log.error("RecommendEngineService.multiChannelRecall 热门召回失败: profile = {}, context = {}",
+                    profile, context, e);
             result.put("hot", List.of());
         }
 
@@ -110,7 +117,8 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
                     queryCategory, queryBrand, queryPriceMin, queryPriceMax);
             result.put("new", sortForChannel("new", newProducts, profile));
         } catch (Exception e) {
-            log.warn("RecommendEngineServiceImpl.multiChannelRecall 新品召回失败: {}", e.getMessage());
+            log.warn("RecommendEngineService.multiChannelRecall 新品召回失败: profile = {}, context = {}",
+                    profile, context, e);
             result.put("new", List.of());
         }
 
@@ -121,13 +129,15 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
                     queryCategory, queryBrand, queryPriceMin, queryPriceMax);
             result.put("category", sortForChannel("category", categoryProducts, profile));
         } catch (Exception e) {
-            log.warn("RecommendEngineServiceImpl.multiChannelRecall 类目召回失败: {}", e.getMessage());
+            log.warn("RecommendEngineService.multiChannelRecall 类目召回失败: profile = {}, context = {}",
+                    profile, context, e);
             result.put("category", List.of());
         }
 
-        List<Product> merged = mergeByRrf(result, recallNum);
+        List<Product> merged = mergeByRrf(result, numItems);
         result.put("merged", merged);
-        log.info("RecommendEngineServiceImpl.multiChannelRecall 合并后候选 {} 条", merged.size());
+        log.info("RecommendEngineService.multiChannelRecall end, profile = {}, context = {}, merged = {}",
+                profile, context, merged);
         return result;
     }
 
@@ -161,6 +171,24 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
         }
         if (brand instanceof String) {
             return (String) brand;
+        }
+        return null;
+    }
+
+    /**
+     * 从 context 中提取改写后的query
+     */
+    private String extractQueryFromContext(Map<String, Object> context) {
+        if (Objects.isNull(context)) {
+            return null;
+        }
+        Object rewrittenQuery = context.get("rewritten_query");
+        if (Objects.nonNull(rewrittenQuery)) {
+            return rewrittenQuery.toString();
+        }
+        Object userQuery = context.get("user_query");
+        if (Objects.nonNull(userQuery)) {
+            return userQuery.toString();
         }
         return null;
     }
@@ -320,8 +348,9 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
      * 因此需要再次查询数据库，从而得到准确的数据，降低幻觉。
      */
     @Override
-    public List<Product> vectorRecall(String userId, UserProfile profile, int numItems) {
-        String query = buildQueryFromProfile(profile);
+    public List<Product> vectorRecall(String query, UserProfile profile, int numItems) {
+        log.info("RecommendEngineService.vectorRecall begin, query = {}, profile = {}", query, profile);
+        //String query = buildQueryFromProfile(profile);
         Map<String, Object> filters = buildVectorFilters(profile);
         List<Document> docs = filters.isEmpty()
                 ? vectorStoreService.searchSimilarProducts(query, numItems * 2)
@@ -330,20 +359,23 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
         List<String> productIds = docs.stream()
                 .map(doc -> {
                     Object id = doc.getMetadata().get("productId");
-                    if (id != null) {
+                    if (Objects.nonNull(id)) {
                         return id.toString();
                     }
                     return null;
                 })
-                .filter(Objects::nonNull)
+                .filter(item -> !StringUtils.isBlank(item))
                 .distinct()
                 .limit(numItems)
                 .collect(Collectors.toList());
         if (productIds.isEmpty()) {
+            log.error("RecommendEngineService.vectorRecall unable to recall products");
             return List.of();
         }
         List<Product> products = productService.listByProductIds(productIds);
-        return reorderByIds(products, productIds);
+        List<Product> reorderProductList = reorderByIds(products, productIds);
+        log.info("RecommendEngineService.vectorRecall end, reorderProductList = {}", reorderProductList);
+        return reorderProductList;
     }
 
     @Override
@@ -454,36 +486,12 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
         log.info("RecommendEngineServiceImpl.recommend 用户={} 开始推荐流程", userId);
 
         // 1. 从 context 中获取用户原始查询，进行智能改写
-        String userQuery = extractUserQuery(context);
-        if (userQuery != null && !userQuery.isEmpty()) {
-            try {
-                // 使用 LLM 改写 query，获取意图和实体
-                RewriteResultDTO rewriteResult = queryRewriteService.rewrite(userQuery, context);
-                log.info("RecommendEngineServiceImpl.recommend query改写: {} → {} intent={}",
-                        userQuery, rewriteResult.getRewrittenQuery(), rewriteResult.getIntent());
-
-                // 将改写结果合并到 context，供后续召回使用
-                if (context != null) {
-                    if (rewriteResult.getEntities() != null) {
-                        context.putAll(rewriteResult.getEntities());
-                    }
-                    // 保存改写后的 query，供向量召回使用
-                    if (rewriteResult.getRewrittenQuery() != null) {
-                        context.put("rewritten_query", rewriteResult.getRewrittenQuery());
-                    }
-                }
-
-                // 如果识别出特定意图，更新画像偏好
-                profile = enrichProfileFromRewrite(profile, rewriteResult);
-            } catch (Exception e) {
-                log.warn("RecommendEngineServiceImpl.recommend query改写失败: {}", e.getMessage());
-            }
-        }
-
+        doRewriteQuery(context);
         // 2. 多路召回
-        Map<String, List<Product>> recallResult = multiChannelRecall(userId, profile, numItems * 3, context);
+        Map<String, List<Product>> recallResult = multiChannelRecall(profile, numItems * 3, context);
         List<Product> candidates = recallResult.getOrDefault("merged", List.of());
         if (candidates.isEmpty()) {
+            log.info("RecommendEngineService.recommend error, unable to recall products");
             candidates = hotRecall(numItems);
         }
 
@@ -499,6 +507,37 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
         log.info("RecommendEngineServiceImpl.recommend user={} 最终推荐ID={}", userId, toIdList(diverse));
 
         return diverse;
+    }
+
+    /**
+     * 对userQuery进行改写：
+     * 具体逻辑通过利用LLM，基于当前已有的userQuery、对话历史、以及 用户画像这些信息
+     * 从而进行改写userQuery
+     * @param context
+     */
+    private void doRewriteQuery(Map<String, Object> context) {
+        String userQuery = extractUserQuery(context);
+        if (!StringUtils.isBlank(userQuery)) {
+            try {
+                // 使用 LLM 改写 query，获取意图和实体
+                RewriteResultDTO rewriteResult = queryRewriteService.rewrite(userQuery, context);
+                log.info("RecommendEngineServiceImpl.doRewriteQuery query改写: originalUserQuery = {}, rewriteQuery = {}",
+                        userQuery, rewriteResult.getRewrittenQuery());
+                // 将改写结果合并到 context，供后续召回使用
+                if (Objects.nonNull(context)) {
+                    if (Objects.nonNull(rewriteResult.getEntities())) {
+                        context.putAll(rewriteResult.getEntities());
+                    }
+                    // 保存改写后的 query，供向量召回使用
+                    if (!StringUtils.isBlank(rewriteResult.getRewrittenQuery())) {
+                        context.put("rewritten_query", rewriteResult.getRewrittenQuery());
+                    }
+                }
+            } catch (Exception e) {
+                log.error("RecommendEngineServiceImpl.doRewriteQuery query改写失败: =context = {}",context, e);
+                throw new BusinessException(ErrorCode.RECOMMEND_ERROR.getCode(), "query改写异常");
+            }
+        }
     }
 
     /**
@@ -525,19 +564,16 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
      * 基于改写结果丰富用户画像
      */
     private UserProfile enrichProfileFromRewrite(UserProfile profile, RewriteResultDTO rewriteResult) {
-        if (rewriteResult == null || rewriteResult.getEntities() == null) {
+        if (Objects.isNull(profile)) {
+            log.error("RecommendEngineService.enrichProfileFromRewrite error, profile is null");
+            return null;
+        }
+        if (Objects.isNull(rewriteResult) || CollectionUtils.isEmpty(rewriteResult.getEntities())) {
             return profile;
         }
 
+        log.info("RecommendEngineService.enrichProfileFromRewrite begin, profile = {}, rewriteResult = {}", profile, rewriteResult);
         Map<String, Object> entities = rewriteResult.getEntities();
-
-        // 如果 profile 为空，创建一个临时画像
-        if (profile == null) {
-            profile = UserProfile.builder()
-                    .userId("temp")
-                    .build();
-        }
-
         // 从实体中更新偏好
         if (entities.get("category") instanceof String) {
             profile.setPreferredCategories((String) entities.get("category"));
@@ -553,7 +589,7 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
             BigDecimal priceMax = BigDecimal.valueOf(((Number) entities.get("price_max")).doubleValue());
             profile.setPriceRangeMax(priceMax);
         }
-
+        log.info("RecommendEngineService.enrichProfileFromRewrite end, enrichProfile = {}", profile);
         return profile;
     }
 
@@ -561,7 +597,7 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
      * 将用户画像字段拼接为向量检索 query。
      * <p>优先使用 LLM 进行智能改写，失败时降级为简单拼接。</p>
      */
-    private String buildQueryFromProfile(UserProfile profile) {
+    /*private String buildQueryFromProfile(UserProfile profile) {
         if (profile == null) {
             return "热门商品推荐";
         }
@@ -620,7 +656,7 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
         } else {
             return "热门商品推荐";
         }
-    }
+    }*/
 
     /**
      * 生成向量检索 metadata 过滤条件。
@@ -710,12 +746,8 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
      * 按指定ID顺序重排，修复数据库回表顺序不稳定问题。
      */
     private List<Product> reorderByIds(List<Product> products, List<String> orderedIds) {
-        if (products == null || products.isEmpty() || orderedIds == null || orderedIds.isEmpty()) {
-            if (products == null) {
-                return List.of();
-            } else {
-                return products;
-            }
+        if (CollectionUtils.isEmpty(products) || CollectionUtils.isEmpty(orderedIds)) {
+            return CollectionUtils.isEmpty(products) ? Collections.EMPTY_LIST : products;
         }
         Map<String, Product> map = products.stream()
                 .filter(p -> p != null && p.getProductId() != null)
@@ -846,7 +878,7 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
      * 记录多路召回结果，便于观察重排前输入。
      */
     private void logRecallSnapshot(String userId, Map<String, List<Product>> recallResult) {
-        log.info("RecommendEngineServiceImpl.recommend user={} 多路召回结果 vector={}, hot={}, new={}, category={}, merged={}",
+        log.info("RecommendEngineService.recommend user={} 多路召回结果 vector={}, hot={}, new={}, category={}, merged={}",
                 userId,
                 toIdList(recallResult.getOrDefault("vector", List.of())),
                 toIdList(recallResult.getOrDefault("hot", List.of())),

@@ -9,7 +9,6 @@ import jakarta.annotation.Resource;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * 商品推荐Agent — 多策略召回 + LLM重排 + 多样性控制
@@ -44,41 +43,20 @@ public class ProductRecAgent extends BaseAgent {
             finalProducts = productService.listHotProducts(numItems);
         }
 
-        // 转换为 model.Product（用于API返回）
-        List<com.ecommerce.model.Product> modelProducts = finalProducts.stream()
-                .map(this::convertToModel)
-                .collect(Collectors.toList());
-
+        // 直接返回 entity.Product 列表
         Map<String, Object> data = new HashMap<>();
-        data.put("products", modelProducts);
+        data.put("products", finalProducts);
         data.put("recall_strategy", "vector+hot+new+category");
         data.put("candidate_count", finalProducts.size());
         data.put("engine_used", "RecommendEngineService");
 
-        log.info("ProductRecAgent.execute 推荐完成，返回 {} 条商品", modelProducts.size());
+        log.info("ProductRecAgent.execute 推荐完成，返回 {} 条商品", finalProducts.size());
 
         return AgentResult.builder()
                 .agentName(name)
                 .success(true)
                 .data(data)
                 .confidence(0.85)
-                .build();
-    }
-
-    /**
-     * 将 entity.Product 转换为 model.Product
-     */
-    private com.ecommerce.model.Product convertToModel(Product entity) {
-        if (entity == null) return null;
-        return com.ecommerce.model.Product.builder()
-                .productId(entity.getProductId())
-                .name(entity.getProductName())
-                .category(entity.getCategoryName())
-                .price(entity.getPrice() != null ? entity.getPrice().doubleValue() : 0)
-                .description(entity.getProductDescription())
-                .brand(entity.getBrand())
-                .stock(entity.getStock() != null ? entity.getStock() : 0)
-                .score(entity.getRating() != null ? entity.getRating().doubleValue() : 0)
                 .build();
     }
 }

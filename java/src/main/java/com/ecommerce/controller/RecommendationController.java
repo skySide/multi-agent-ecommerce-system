@@ -3,6 +3,7 @@ package com.ecommerce.controller;
 import com.ecommerce.common.Result;
 import com.ecommerce.common.enums.ErrorCode;
 import com.ecommerce.dto.RecommendationRequestDTO;
+import com.ecommerce.entity.Product;
 import com.ecommerce.model.RecommendationRequest;
 import com.ecommerce.model.RecommendationResponse;
 import com.ecommerce.orchestrator.SupervisorOrchestrator;
@@ -19,6 +20,7 @@ import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -78,7 +80,7 @@ public class RecommendationController {
     private RecommendResponseVO convertToVO(RecommendationResponse r) {
         List<ProductVO> productVOs = new ArrayList<>();
         if (r.getProducts() != null) {
-            productVOs = r.getProducts().stream().map(this::modelProductToVO).collect(Collectors.toList());
+            productVOs = r.getProducts().stream().map(this::entityProductToVO).collect(Collectors.toList());
         }
         Map<String, AgentResultVO> agentVOs = new HashMap<>();
         if (r.getAgentResults() != null) {
@@ -95,16 +97,22 @@ public class RecommendationController {
                 .build();
     }
 
-    private ProductVO modelProductToVO(com.ecommerce.model.Product p) {
+    private ProductVO entityProductToVO(Product product) {
         return ProductVO.builder()
-                .productId(p.getProductId())
-                .productName(p.getName())
-                .productDescription(p.getDescription())
-                .price(java.math.BigDecimal.valueOf(p.getPrice()))
-                .stock(p.getStock())
-                .rating(java.math.BigDecimal.valueOf(p.getScore()))
-                .brand(p.getBrand())
-                .categoryName(p.getCategory())
+                .productId(product.getProductId())
+                .productName(product.getProductName())
+                .productDescription(product.getProductDescription())
+                .price(product.getPrice())
+                .originalPrice(product.getOriginalPrice())
+                .stock(product.getStock() != null ? product.getStock() : 0)
+                .salesCount(product.getSalesCount() != null ? product.getSalesCount() : 0)
+                .rating(product.getRating() != null ? product.getRating() : BigDecimal.ZERO)
+                .brand(product.getBrand())
+                .categoryId(product.getCategoryId())
+                .categoryName(product.getCategoryName())
+                .mainImage(product.getMainImage())
+                .images(product.getImages() != null ? List.of(product.getImages().split(",")) : null)
+                .productStatus(product.getProductStatus() != null ? product.getProductStatus() : 0)
                 .build();
     }
 

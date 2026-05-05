@@ -15,18 +15,17 @@ public interface RecommendEngineService {
     /**
      * 多路召回候选商品
      *
-     * @param userId   用户ID
      * @param profile  用户画像
      * @param numItems 需要的数量
      * @param context  上下文信息
      * @return 召回结果，key为召回通道名称
      */
-    Map<String, List<Product>> multiChannelRecall(String userId, UserProfile profile, int numItems, Map<String, Object> context);
+    Map<String, List<Product>> multiChannelRecall(UserProfile profile, int numItems, Map<String, Object> context);
 
     /**
      * 向量搜索召回
      */
-    List<Product> vectorRecall(String userId, UserProfile profile, int numItems);
+    List<Product> vectorRecall(String query, UserProfile profile, int numItems);
 
     /**
      * 热门商品召回

@@ -1,8 +1,10 @@
 package com.ecommerce.service.impl;
 
+import com.baomidou.mybatisplus.core.toolkit.StringUtils;
 import com.ecommerce.dto.RewriteResultDTO;
 import com.ecommerce.service.QueryRewriteService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.jsonwebtoken.lang.Strings;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -69,26 +71,19 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
     @Override
     public RewriteResultDTO rewrite(String userQuery, Map<String, Object> context) {
         log.info("QueryRewriteServiceImpl.rewrite 开始改写 query={}", userQuery);
-
-        if (userQuery == null || userQuery.trim().isEmpty()) {
+        if (StringUtils.isBlank(userQuery)) {
             return buildFallbackResult("", context);
         }
 
         try {
-            // 构建上下文信息
+            // 构建上下文信息,获取 对话历史 + 用户画像
             String contextStr = buildContextString(context);
-
             // 调用 LLM 进行改写
             String prompt = String.format(REWRITE_PROMPT, userQuery, contextStr);
-            String response = chatClient.prompt().user(prompt).call().content();
-
-            // 解析结果
-            RewriteResultDTO result = parseRewriteResult(userQuery, response);
-            log.info("QueryRewriteServiceImpl.rewrite 改写完成 original={} → rewritten={} intent={}",
-                    userQuery, result.getRewrittenQuery(), result.getIntent());
-
+            RewriteResultDTO result = chatClient.prompt().user(prompt).call().entity(RewriteResultDTO.class);
+            log.info("QueryRewriteServiceImpl.rewrite 改写完成 originalUserQuery = {}, rewriteResult = {}",
+                    userQuery, result);
             return result;
-
         } catch (Exception e) {
             log.error("QueryRewriteServiceImpl.rewrite 改写失败 query={}", userQuery, e);
             return buildFallbackResult(userQuery, context);
@@ -185,20 +180,16 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
      */
     private String buildContextString(Map<String, Object> context) {
         if (context == null || context.isEmpty()) {
-            return "无";
+            return Strings.EMPTY;
         }
         StringBuilder sb = new StringBuilder();
-        if (context.get("history") != null) {
+        if (Objects.nonNull(context.get("history"))) {
             sb.append("对话历史: ").append(context.get("history")).append("\n");
         }
-        if (context.get("profile") != null) {
+        if (Objects.nonNull(context.get("profile"))) {
             sb.append("用户画像: ").append(context.get("profile")).append("\n");
         }
-        if (sb.length() > 0) {
-            return sb.toString();
-        } else {
-            return "无";
-        }
+        return sb.length() > 0 ? sb.toString() : Strings.EMPTY;
     }
 
     /**
