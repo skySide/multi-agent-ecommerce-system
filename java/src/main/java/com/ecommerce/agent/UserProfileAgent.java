@@ -66,9 +66,9 @@ public class UserProfileAgent extends BaseAgent {
 
         // 5. 保存画像到数据库
         try {
-            saveProfileToDb(userId, profile, behavior);
+            saveProfileToDb(userId, profile);
         } catch (Exception e) {
-            log.warn("UserProfileAgent.execute 保存画像到数据库失败: {}", e.getMessage());
+            log.error("UserProfileAgent.execute 保存画像到数据库失败", e);
         }
 
         Map<String, Object> data = new HashMap<>();
@@ -181,7 +181,7 @@ public class UserProfileAgent extends BaseAgent {
                     .realTimeTags(dto.getRealTimeTags() != null ? dto.getRealTimeTags().toString() : "")
                     .build();
         } catch (Exception e) {
-            log.warn("UserProfileAgent.buildProfileFromDto 构建失败 userId={}: {}", userId, e.getMessage());
+            log.error("UserProfileAgent.buildProfileFromDto 构建失败 userId={}", userId, e);
             return fallbackProfile(userId, behavior);
         }
     }
@@ -197,7 +197,7 @@ public class UserProfileAgent extends BaseAgent {
     /**
      * 将画像保存到数据库
      */
-    private void saveProfileToDb(String userId, UserProfile profile, Map<String, Object> behavior) {
+    private void saveProfileToDb(String userId, UserProfile profile) {
         userProfileService.saveOrUpdateProfile(profile);
         log.info("UserProfileAgent.saveProfileToDb 用户画像已保存 userId={}", userId);
     }

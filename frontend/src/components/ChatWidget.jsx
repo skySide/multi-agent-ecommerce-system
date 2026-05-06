@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Input, Button, Avatar, Spin, Tag, Card } from 'antd'
-import { MessageOutlined, CloseOutlined, SendOutlined, RobotOutlined, UserOutlined, ShoppingOutlined } from '@ant-design/icons'
+import { Input, Button, Avatar, Spin, Tag, Card, message } from 'antd'
+import { MessageOutlined, CloseOutlined, SendOutlined, RobotOutlined, UserOutlined, ShoppingOutlined, LikeOutlined, LikeFilled, DislikeOutlined, DislikeFilled } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 
@@ -16,11 +16,12 @@ const SUGGESTED_QUESTIONS = [
 function ChatWidget() {
   const [visible, setVisible] = useState(false)
   const [messages, setMessages] = useState([
-    { type: 'bot', content: '您好！我是智能购物助手，可以帮您推荐商品、解答售后问题。有什么可以帮您的吗？', products: [] }
+    { type: 'bot', content: '您好！我是智能购物助手，可以帮您推荐商品、解答售后问题。有什么可以帮您的吗？', products: [], rating: 0 }
   ])
   const [inputValue, setInputValue] = useState('')
   const [loading, setLoading] = useState(false)
   const [sessionId, setSessionId] = useState(null)
+  const [lastUserMessage, setLastUserMessage] = useState('')
   // 未登录时不展示对话入口，直接 return 不渲染任何东西
   const userId = localStorage.getItem('userId') || null
   const isLoggedIn = !!userId
@@ -38,6 +39,7 @@ function ChatWidget() {
     const userMsg = (text || '').trim()
     if (!userMsg) return
 
+    setLastUserMessage(userMsg)
     setMessages(prev => [...prev, { type: 'user', content: userMsg }])
     setInputValue('')
     setLoading(true)
@@ -53,7 +55,8 @@ function ChatWidget() {
           type: 'bot',
           content: response.message || '抱歉，我没有理解您的问题。',
           products: response.recommendedProducts || [],
-          intent: response.intent
+          intent: response.intent,
+          rating: 0
         }])
       }
     } catch (error) {
@@ -61,7 +64,8 @@ function ChatWidget() {
       setMessages(prev => [...prev, {
         type: 'bot',
         content: '抱歉，服务暂时不可用，请稍后再试。',
-        products: []
+        products: [],
+        rating: 0
       }])
     } finally {
       setLoading(false)
@@ -77,6 +81,28 @@ function ChatWidget() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
+    }
+  }
+
+  // 处理反馈
+  const handleFeedback = async (index, rating) => {
+    const msg = messages[index]
+    if (msg.type !== 'bot' || msg.rating !== 0) {
+      return // 已评价过
+    }
+
+    try {
+      await api.submitFeedback(userId, sessionId, index, lastUserMessage, msg.content, rating)
+      
+      // 更新本地状态
+      setMessages(prev => prev.map((m, i) => 
+        i === index ? { ...m, rating } : m
+      ))
+      
+      message.success(rating === 1 ? '感谢您的认可！' : '感谢您的反馈，我们会持续改进！')
+    } catch (error) {
+      console.error('反馈提交失败:', error)
+      message.error('反馈提交失败')
     }
   }
 
@@ -147,6 +173,31 @@ function ChatWidget() {
                   }}>
                     {msg.content}
                   </div>
+                  
+                  {/* 反馈按钮 - 仅对AI回复显示 */}
+                  {msg.type === 'bot' && index > 0 && (
+                    <div style={{ marginTop: 4, display: 'flex', gap: 8 }}>
+                      <Button 
+                        type="text" 
+                        size="small"
+                        icon={msg.rating === 1 ? <LikeFilled style={{ color: '#52c41a' }} /> : <LikeOutlined />}
+                        onClick={() => handleFeedback(index, 1)}
+                        style={{ fontSize: 12, color: msg.rating === 1 ? '#52c41a' : '#999' }}
+                      >
+                        有用
+                      </Button>
+                      <Button 
+                        type="text" 
+                        size="small"
+                        icon={msg.rating === -1 ? <DislikeFilled style={{ color: '#ff4d4f' }} /> : <DislikeOutlined />}
+                        onClick={() => handleFeedback(index, -1)}
+                        style={{ fontSize: 12, color: msg.rating === -1 ? '#ff4d4f' : '#999' }}
+                      >
+                        没帮助
+                      </Button>
+                    </div>
+                  )}
+                  
                   {/* 推荐商品 */}
                   {msg.products?.length > 0 && (
                     <div style={{ marginTop: 8 }}>

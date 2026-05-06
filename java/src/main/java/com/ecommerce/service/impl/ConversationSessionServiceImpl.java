@@ -44,6 +44,7 @@ public class ConversationSessionServiceImpl extends ServiceImpl<ConversationSess
                 .userId(userId)
                 .status(1)
                 .dialogueHistory("[]")
+                .summary("")
                 .extractedInfo("{}")
                 .build();
         save(session);
@@ -58,5 +59,50 @@ public class ConversationSessionServiceImpl extends ServiceImpl<ConversationSess
             return updateById(session);
         }
         return false;
+    }
+
+    @Override
+    public List<ConversationSession> findSessionsNeedingSummary(int threshold) {
+        // 查询进行中且对话历史不为空的会话，然后在内存中过滤轮数
+        List<ConversationSession> activeSessions = lambdaQuery()
+                .eq(ConversationSession::getStatus, 1)
+                .isNotNull(ConversationSession::getDialogueHistory)
+                .list();
+
+        // 过滤出对话轮数超过阈值的会话（每轮包含用户和助手两条消息）
+        int messageThreshold = threshold * 2;
+        return activeSessions.stream()
+                .filter(session -> {
+                    String history = session.getDialogueHistory();
+                    if (history == null || history.isEmpty() || history.equals("[]")) {
+                        return false;
+                    }
+                    // 简单计算消息条数（通过逗号数量估算）
+                    int messageCount = countMessages(history);
+                    return messageCount > messageThreshold;
+                })
+                .toList();
+    }
+
+    /**
+     * 计算对话历史中的消息条数
+     */
+    private int countMessages(String historyJson) {
+        if (historyJson == null || historyJson.isEmpty()) {
+            return 0;
+        }
+        // 计算包含 "用户:" 或 "助手:" 的数量
+        int count = 0;
+        int index = 0;
+        while ((index = historyJson.indexOf("用户:", index)) != -1) {
+            count++;
+            index++;
+        }
+        index = 0;
+        while ((index = historyJson.indexOf("助手:", index)) != -1) {
+            count++;
+            index++;
+        }
+        return count;
     }
 }

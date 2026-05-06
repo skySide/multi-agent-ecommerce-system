@@ -152,6 +152,25 @@ class ApiService {
     return this.request(`${API_BASE_URL}/v1/conversation/session?userId=${userId}`, { method: 'POST' })
   }
 
+  // ===== AI反馈 =====
+  async submitFeedback(userId, sessionId, messageIndex, userMessage, aiMessage, rating) {
+    return this.request(`${API_BASE_URL}/v1/chat/feedback`, {
+      method: 'POST',
+      body: JSON.stringify({
+        userId,
+        sessionId,
+        messageIndex,
+        userMessage,
+        aiMessage,
+        rating
+      })
+    })
+  }
+
+  async getSatisfactionStats() {
+    return this.request(`${API_BASE_URL}/v1/chat/feedback/stats`)
+  }
+
   // ===== 实验 =====
   async getExperiments() {
     return this.request(`${API_BASE_URL}/v1/experiments`)

@@ -6,38 +6,45 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
- * 对话会话实体类
+ * AI回复反馈实体类
+ * 用于记录用户对AI回复的点赞/点踩
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@TableName("conversation_session")
-public class ConversationSession {
+@TableName("chat_feedback")
+public class ChatFeedback implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    /** 会话ID */
-    private String sessionId;
-
     /** 用户ID */
     private String userId;
 
-    /** 对话历史JSON */
-    private String dialogueHistory;
+    /** 会话ID */
+    private String sessionId;
 
-    /** 对话摘要（LLM生成） */
-    private String summary;
+    /** 消息索引位置 */
+    private Integer messageIndex;
 
-    /** 提取的信息JSON */
-    private String extractedInfo;
+    /** 用户消息 */
+    private String userMessage;
 
-    /** 状态: 0-结束, 1-进行中 */
-    private Integer status;
+    /** AI回复内容 */
+    private String aiMessage;
+
+    /** 评分: 1-赞, -1-踩, 0-未评价 */
+    private Integer rating;
+
+    /** 反馈时间 */
+    private LocalDateTime feedbackTime;
 
     @TableLogic
     @TableField(fill = FieldFill.INSERT)

@@ -194,6 +194,7 @@ CREATE TABLE `conversation_session` (
     `session_id` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '会话ID',
     `user_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '用户ID',
     `dialogue_history` TEXT COMMENT '对话历史JSON',
+    `summary` TEXT COMMENT '对话摘要（LLM生成）',
     `extracted_info` TEXT COMMENT '提取的信息JSON',
     `status` TINYINT DEFAULT 1 COMMENT '状态: 0-结束, 1-进行中',
     `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除',
@@ -203,6 +204,27 @@ CREATE TABLE `conversation_session` (
     INDEX `idx_user_id` (`user_id`),
     INDEX `idx_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='对话会话表';
+
+-- ----------------------------
+-- AI回复反馈表
+-- ----------------------------
+DROP TABLE IF EXISTS `chat_feedback`;
+CREATE TABLE `chat_feedback` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    `user_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '用户ID',
+    `session_id` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '会话ID',
+    `message_index` INT DEFAULT 0 COMMENT '消息索引位置',
+    `user_message` TEXT COMMENT '用户消息',
+    `ai_message` TEXT COMMENT 'AI回复内容',
+    `rating` TINYINT DEFAULT 0 COMMENT '评分: 1-赞, -1-踩, 0-未评价',
+    `feedback_time` DATETIME DEFAULT NULL COMMENT '反馈时间',
+    `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除',
+    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX `idx_user_id` (`user_id`),
+    INDEX `idx_session_id` (`session_id`),
+    INDEX `idx_rating` (`rating`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI回复反馈表';
 
 -- ----------------------------
 -- 对话画像更新记录表

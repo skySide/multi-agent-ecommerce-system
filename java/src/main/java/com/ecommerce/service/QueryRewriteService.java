@@ -37,4 +37,15 @@ public interface QueryRewriteService {
      * @return              改写后的查询列表
      */
     List<String> expandVariants(String userQuery, int numVariants);
+
+    /**
+     * 结合对话历史和摘要进行 Query 改写
+     * 用于智能客服场景，降低幻觉率
+     *
+     * @param query   用户原始查询
+     * @param history 对话历史列表
+     * @param summary 对话摘要
+     * @return 改写后的查询，失败时返回原始查询
+     */
+    String rewriteWithContext(String query, List<String> history, String summary);
 }

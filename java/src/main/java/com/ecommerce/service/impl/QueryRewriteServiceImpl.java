@@ -244,4 +244,53 @@ public class QueryRewriteServiceImpl implements QueryRewriteService {
                 .confidence(0.5)
                 .build();
     }
+
+    @Override
+    public String rewriteWithContext(String query, List<String> history, String summary) {
+        log.info("QueryRewriteServiceImpl.rewriteWithContext 开始改写 query={}", query);
+
+        if (StringUtils.isBlank(query)) {
+            return query;
+        }
+
+        try {
+            // 构建历史上下文
+            StringBuilder historyContext = new StringBuilder();
+
+            if (StringUtils.isNotBlank(summary)) {
+                historyContext.append("对话摘要：").append(summary).append("\n\n");
+            }
+
+            if (history != null && !history.isEmpty()) {
+                List<String> recent = history.subList(Math.max(0, history.size() - 6), history.size());
+                historyContext.append("最近对话：\n").append(String.join("\n", recent)).append("\n\n");
+            }
+
+            // 构建 Prompt
+            String prompt = String.format("""
+                    你是一个电商搜索专家。请根据对话上下文改写用户查询，使其更明确、更适合检索。
+
+                    要求：
+                    1. 结合对话上下文理解用户真实意图
+                    2. 补充省略的信息（如代词指代）
+                    3. 使用标准类目名称
+                    4. 只输出改写后的 query，不要解释
+
+                    %s用户查询：%s
+
+                    改写后的查询：
+                    """,
+                    historyContext.toString(),
+                    query
+            );
+
+            String rewritten = chatClient.prompt().user(prompt).call().content().trim();
+            log.info("QueryRewriteServiceImpl.rewriteWithContext 改写结果: {} → {}", query, rewritten);
+            return rewritten;
+
+        } catch (Exception e) {
+            log.warn("QueryRewriteServiceImpl.rewriteWithContext 改写失败: {}", e.getMessage());
+            return query; // 降级返回原始 query
+        }
+    }
 }

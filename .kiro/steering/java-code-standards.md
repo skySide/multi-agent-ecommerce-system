@@ -515,3 +515,117 @@ if (Objects.nonNull(product)) {
 - [ ] 集合判空是否使用 CollectionUtils
 - [ ] 字符串判空是否使用 StringUtils.isBlank
 - [ ] 对象判空是否使用 Objects.isNull
+
+
+---
+
+## 12. Controller 参数规范
+
+### 12.1 POST 请求使用请求体
+POST 请求的参数必须放在请求体中，使用 `@RequestBody` 接收，**禁止**使用 `@RequestParam`：
+
+```java
+// 正确示例
+@PostMapping("/feedback")
+public Result<Map<String, Object>> submitFeedback(@RequestBody @Valid FeedbackRequestDTO dto) {
+    // 业务逻辑
+}
+
+// 错误示例
+@PostMapping("/feedback")
+public Result<Map<String, Object>> submitFeedback(
+        @RequestParam("userId") String userId,
+        @RequestParam("sessionId") String sessionId) {
+    // 业务逻辑
+}
+```
+
+### 12.2 参数超过5个时定义DTO
+当接口参数超过5个时，**必须**定义专门的 DTO 类：
+
+```java
+// 正确示例 - 使用DTO
+@Data
+public class FeedbackRequestDTO implements Serializable {
+    private static final long serialVersionUID = 1L;
+    
+    private String userId;
+    private String sessionId;
+    private Integer messageIndex;
+    private String userMessage;
+    private String aiMessage;
+    private Integer rating;
+}
+
+@PostMapping("/feedback")
+public Result<Map<String, Object>> submitFeedback(@RequestBody @Valid FeedbackRequestDTO dto) {
+    // 业务逻辑
+}
+
+// 错误示例 - 参数过多
+@PostMapping("/feedback")
+public Result<Map<String, Object>> submitFeedback(
+        @RequestBody String userId,
+        @RequestBody String sessionId,
+        @RequestBody Integer messageIndex,
+        @RequestBody String userMessage,
+        @RequestBody String aiMessage,
+        @RequestBody Integer rating) {
+    // 业务逻辑
+}
+```
+
+### 12.3 DTO 规范要求
+- DTO 必须实现 `Serializable` 接口
+- DTO 必须定义 `serialVersionUID`
+- 所有属性必须添加注释说明
+
+---
+
+## 13. 字符串判空规范（补充）
+
+### 13.1 禁止直接使用 == null || isEmpty()
+判断字符串是否为空，**必须**使用 `StringUtils.isBlank()` 或 `StringUtils.isBlank()`，禁止直接拼接判断：
+
+```java
+// 正确示例
+import org.apache.commons.lang3.StringUtils;
+
+public void processName(String name) {
+    if (StringUtils.isBlank(name)) {
+        log.error("ProductService.processName - 商品名称为空");
+        throw new BusinessException(ErrorCode.NAME_IS_NULL);
+    }
+    
+    // 处理逻辑
+}
+
+// 错误示例
+public void processName(String name) {
+    if (name == null || name.isEmpty()) {  // 禁止使用
+        throw new BusinessException(ErrorCode.NAME_IS_NULL);
+    }
+    
+    // 错误示例
+    if (name == null || name.length() == 0) {  // 禁止使用
+        throw new BusinessException(ErrorCode.NAME_IS_NULL);
+    }
+}
+```
+
+### 13.2 StringUtils.isBlank() vs StringUtils.isEmpty()
+- `StringUtils.isBlank()` - 判断是否为 null、空字符串、或全为空白字符（推荐使用）
+- `StringUtils.isEmpty()` - 仅判断是否为 null 或空字符串
+
+```java
+StringUtils.isBlank(null)      = true
+StringUtils.isBlank("")        = true
+StringUtils.isBlank(" ")       = true   // 空白字符也返回 true
+StringUtils.isBlank("bob")     = false
+StringUtils.isBlank("  bob  ") = false
+
+StringUtils.isEmpty(null)      = true
+StringUtils.isEmpty("")        = true
+StringUtils.isEmpty(" ")       = false  // 空白字符返回 false
+StringUtils.isEmpty("bob")     = false
+```
