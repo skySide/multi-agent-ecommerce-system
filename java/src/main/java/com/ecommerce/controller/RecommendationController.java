@@ -91,7 +91,6 @@ public class RecommendationController {
                 .requestId(r.getRequestId())
                 .userId(r.getUserId())
                 .productVOList(productVOs)
-                .marketingCopies(r.getMarketingCopies())
                 .experimentGroup(r.getExperimentGroup())
                 .agentResults(agentVOs)
                 .totalLatencyMs(r.getTotalLatencyMs())
