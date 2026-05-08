@@ -122,7 +122,9 @@ public class UserBehaviorTool {
 
         // 步骤5: 序列化返回
         try {
-            return objectMapper.writeValueAsString(behavior);
+            String jsonStr = objectMapper.writeValueAsString(behavior);
+            log.info("UserBehaviorTool.collectUserBehavior end, behaviorJSONStr = {}", jsonStr);
+            return jsonStr;
         } catch (JsonProcessingException e) {
             log.error("UserBehaviorTool.collectUserBehavior - 序列化失败, userId: {}", userId, e);
             return "{}";

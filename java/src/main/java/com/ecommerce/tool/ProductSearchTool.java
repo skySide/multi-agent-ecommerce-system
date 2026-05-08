@@ -140,6 +140,31 @@ public class ProductSearchTool {
     }
 
     /**
+     * 查询单个商品的详细信息
+     */
+    @Tool(name = "getProductInfo", description = "查询单个商品的详细信息，包括商品名称、类目、价格、品牌和描述")
+    public Product getProductInfo(
+            @ToolParam(description = "商品ID") String productId) {
+        // 步骤1: 参数校验
+        if (Objects.isNull(productId)) {
+            log.error("ProductSearchTool.getProductInfo - 参数为空, productId: null");
+            return null;
+        }
+
+        log.info("ProductSearchTool.getProductInfo - 查询商品信息, productId: {}", productId);
+
+        // 步骤2: 查询商品
+        Product product = productService.getByProductId(productId);
+        if (Objects.isNull(product)) {
+            log.warn("ProductSearchTool.getProductInfo - 商品不存在, productId: {}", productId);
+            return null;
+        }
+
+        log.info("ProductSearchTool.getProductInfo - 查询完成, productId: {}, name: {}", productId, product.getProductName());
+        return product;
+    }
+
+    /**
      * 按指定ID顺序重排商品列表
      */
     private List<Product> reorderByIds(List<Product> products, List<String> orderedIds) {

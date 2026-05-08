@@ -58,7 +58,7 @@ public class SupervisorOrchestrator {
         CompletableFuture<AgentResult> profileFuture = userProfileAgent.runAsync(
                 Map.of("userId", request.getUserId()));
         CompletableFuture<AgentResult> recFuture = productRecAgent.runAsync(
-                Map.of("userId", request.getUserId(), "numItems", request.getNumItems() * 2));
+                Map.of("userId", request.getUserId(), "numItems", request.getNumItems()));
 
         AgentResult profileResult = profileFuture.join();
         AgentResult recResult = recFuture.join();
