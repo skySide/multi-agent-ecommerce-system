@@ -12,6 +12,9 @@ spring:
         options:
           model: ${SILICONFLOW_CHAT_MODEL:deepseek-ai/DeepSeek-V3}
           temperature: 0.7
+          # 调大输出窗口：DeepSeek-V3支持64K上下文，max-tokens设为8192
+          # 默认值(256-512)在tool calling+结构化输出场景下易导致JSON被截断
+          max-tokens: 8192
       embedding:
         options:
           model: ${SILICONFLOW_EMBEDDING_MODEL:BAAI/bge-large-zh-v1.5}

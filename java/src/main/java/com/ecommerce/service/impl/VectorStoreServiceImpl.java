@@ -3,6 +3,7 @@ package com.ecommerce.service.impl;
 import com.ecommerce.service.VectorStoreService;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.VectorStore;
@@ -58,6 +59,10 @@ public class VectorStoreServiceImpl implements VectorStoreService {
             log.warn("VectorStoreServiceImpl.searchSimilarProducts VectorStore不可用，返回空结果");
             return new ArrayList<>();
         }
+        if (StringUtils.isBlank(query)) {
+            log.warn("VectorStoreServiceImpl.searchSimilarProducts 查询参数为空，返回空结果");
+            return new ArrayList<>();
+        }
         try {
             SearchRequest request = SearchRequest.builder()
                     .query(query)
@@ -74,6 +79,10 @@ public class VectorStoreServiceImpl implements VectorStoreService {
     public List<Document> searchSimilarProducts(String query, int topK, Map<String, Object> filters) {
         if (vectorStore == null) {
             log.warn("VectorStoreServiceImpl.searchSimilarProducts VectorStore不可用，返回空结果");
+            return new ArrayList<>();
+        }
+        if (StringUtils.isBlank(query)) {
+            log.warn("VectorStoreServiceImpl.searchSimilarProducts 查询参数为空，返回空结果");
             return new ArrayList<>();
         }
         try {

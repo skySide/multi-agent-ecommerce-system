@@ -350,7 +350,6 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
     @Override
     public List<Product> vectorRecall(String query, UserProfile profile, int numItems) {
         log.info("RecommendEngineService.vectorRecall begin, query = {}, profile = {}", query, profile);
-        //String query = buildQueryFromProfile(profile);
         Map<String, Object> filters = buildVectorFilters(profile);
         List<Document> docs = filters.isEmpty()
                 ? vectorStoreService.searchSimilarProducts(query, numItems * 2)

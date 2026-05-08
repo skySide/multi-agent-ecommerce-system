@@ -6,6 +6,8 @@ import com.ecommerce.entity.Product;
 import com.ecommerce.entity.UserProfile;
 import com.ecommerce.model.ConversationRequest;
 import com.ecommerce.model.ConversationResponse;
+import com.ecommerce.model.response.IntentRecognitionResult;
+import com.ecommerce.model.response.ProductNamesResult;
 import com.ecommerce.service.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
@@ -89,9 +91,9 @@ public class ConversationServiceImpl implements ConversationService {
         String summary = session.getSummary();
 
         // 3. 意图识别 + 实体抽取
-        IntentResult intentResult = recognizeIntent(message, history, summary);
-        String intent = intentResult.intent;
-        Map<String, Object> entities = intentResult.entities;
+        IntentRecognitionResult intentResult = recognizeIntent(message, history, summary);
+        String intent = intentResult.getIntent();
+        Map<String, Object> entities = intentResult.getEntities();
 
         log.info("ConversationService.chat 意图识别结果: intent={} entities={}", intent, entities);
 
@@ -394,11 +396,11 @@ public class ConversationServiceImpl implements ConversationService {
 
     // ========== 意图识别 ==========
 
-    private IntentResult recognizeIntent(String message, List<String> history, String summary) {
+    private IntentRecognitionResult recognizeIntent(String message, List<String> history, String summary) {
         String historyContext = buildHistoryContext(history, summary);
 
         String prompt = String.format(
-                "分析用户意图，输出JSON：{\"intent\":\"recommend|product_query|knowledge_query|compare|chitchat\",\"entities\":{...}}\n" +
+                "分析用户意图。\n" +
                         "意图说明：\n" +
                         "- recommend: 用户想要推荐商品（如\"推荐手机\"\"适合学生的笔记本\"）\n" +
                         "- product_query: 用户询问某款商品（如\"iPhone 16 多少钱\"\"华为 Mate 70 怎么样\"）\n" +
@@ -406,28 +408,19 @@ public class ConversationServiceImpl implements ConversationService {
                         "- compare: 用户对比商品（如\"iPhone 和 华为哪个好\"\"对比这两款笔记本\"）\n" +
                         "- chitchat: 闲聊\n" +
                         "实体可包含：category(类目), brand(品牌), price_min, price_max, product_name(商品名), product_names(商品名数组), num_items\n" +
-                        "%s用户消息：%s\n只输出JSON。",
+                        "%s用户消息：%s",
                 historyContext, message
         );
 
         try {
-            String response = chatClient.prompt().user(prompt).call().content();
-            String cleaned = response.trim();
-            if (cleaned.startsWith("```")) {
-                cleaned = cleaned.substring(cleaned.indexOf('\n') + 1);
-                cleaned = cleaned.substring(0, cleaned.lastIndexOf("```"));
+            IntentRecognitionResult result = chatClient.prompt().user(prompt).call().entity(IntentRecognitionResult.class);
+            if (result != null && result.getIntent() != null) {
+                return result;
             }
-
-            @SuppressWarnings("unchecked")
-            Map<String, Object> result = objectMapper.readValue(cleaned, Map.class);
-            String intent = (String) result.getOrDefault("intent", "chitchat");
-            @SuppressWarnings("unchecked")
-            Map<String, Object> entities = (Map<String, Object>) result.getOrDefault("entities", Map.of());
-
-            return new IntentResult(intent, entities);
+            return new IntentRecognitionResult("chitchat", new HashMap<>());
         } catch (Exception e) {
             log.error("ConversationService.recognizeIntent 意图识别失败", e);
-            return new IntentResult("chitchat", Map.of());
+            return new IntentRecognitionResult("chitchat", new HashMap<>());
         }
     }
 
@@ -620,31 +613,16 @@ public class ConversationServiceImpl implements ConversationService {
         List<String> names = new ArrayList<>();
         try {
             String prompt = String.format(
-                    "从用户消息中提取商品名称，返回JSON数组格式。\n" +
-                            "例如：{\"products\":[\"iPhone 16\",\"华为 Mate 70\"]}\n" +
-                            "用户消息：%s\n只输出JSON。",
+                    "从用户消息中提取商品名称。\n用户消息：%s",
                     message
             );
-            String response = chatClient.prompt().user(prompt).call().content();
-            String cleaned = response.trim();
-            if (cleaned.startsWith("```")) {
-                cleaned = cleaned.substring(cleaned.indexOf('\n') + 1);
-                cleaned = cleaned.substring(0, cleaned.lastIndexOf("```"));
-            }
-            @SuppressWarnings("unchecked")
-            Map<String, Object> result = objectMapper.readValue(cleaned, Map.class);
-            @SuppressWarnings("unchecked")
-            List<String> products = (List<String>) result.get("products");
-            if (products != null) {
-                names = products;
+            ProductNamesResult result = chatClient.prompt().user(prompt).call().entity(ProductNamesResult.class);
+            if (result != null && result.getProducts() != null) {
+                names = result.getProducts();
             }
         } catch (Exception e) {
             log.warn("ConversationServiceImpl.extractProductNamesFromMessage 失败: {}", e.getMessage());
         }
         return names;
-    }
-
-    // 内部类：意图识别结果
-    private record IntentResult(String intent, Map<String, Object> entities) {
     }
 }

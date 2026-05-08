@@ -1,40 +1,44 @@
 package com.ecommerce.agent;
 
 import com.ecommerce.dto.UserProfileAnalysisDTO;
-import com.ecommerce.entity.UserBehavior;
 import com.ecommerce.entity.UserProfile;
 import com.ecommerce.model.AgentResult;
-import com.ecommerce.service.UserBehaviorService;
 import com.ecommerce.service.UserProfileService;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ecommerce.tool.UserBehaviorTool;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import java.math.BigDecimal;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * 用户画像Agent — 实时特征提取 + RFM模型 + 用户分群
- * 接入真实用户行为数据
+ * 用户画像Agent
+ * 实时特征提取 + RFM模型 + 用户分群
+ * 通过 UserBehaviorTool 收集行为数据，LLM分析生成画像
  */
 @Component
 public class UserProfileAgent extends BaseAgent {
 
     @Resource
     private ChatClient chatClient;
+
     @Resource
-    private UserBehaviorService userBehaviorService;
+    private UserBehaviorTool userBehaviorTool;
+
     @Resource
     private UserProfileService userProfileService;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    /** 默认用户分群 */
+    private static final String DEFAULT_SEGMENT = "active";
 
-    private static final String SYSTEM_PROMPT = """
-            你是一个电商用户画像分析专家。根据用户的行为数据,分析用户特征并生成画像。
-            请严格按照要求的JSON格式输出，不要包含任何其他文字。""";
+    /** 默认价格区间下限 */
+    private static final double DEFAULT_PRICE_MIN = 0.0;
+
+    /** 默认价格区间上限 */
+    private static final double DEFAULT_PRICE_MAX = 10000.0;
 
     public UserProfileAgent() {
         super("user_profile", 5.0, 2);
@@ -42,41 +46,50 @@ public class UserProfileAgent extends BaseAgent {
 
     @Override
     protected AgentResult execute(Map<String, Object> params) throws Exception {
+        // 步骤1: 获取用户ID
         String userId = (String) params.get("userId");
-        log.info("UserProfileAgent.execute 开始分析用户画像 userId={}", userId);
+        log.info("UserProfileAgent.execute - 开始分析用户画像, userId: {}", userId);
 
-        // 1. 从数据库读取真实行为数据
-        Map<String, Object> behavior = collectBehavior(userId);
-
-        // 2. 读取已有画像（如果有）
+        // 步骤2: 查询已有画像
         UserProfile existingProfile = userProfileService.getByUserId(userId);
 
-        // 3. 构建 LLM 分析提示，使用结构化输出直接映射到DTO
-        String behaviorJson = objectMapper.writeValueAsString(behavior);
-        BeanOutputConverter<UserProfileAnalysisDTO> converter = new BeanOutputConverter<>(UserProfileAnalysisDTO.class);
-        String response = chatClient.prompt()
-                .system(SYSTEM_PROMPT + "\n" + converter.getFormat())
-                .user("用户ID: " + userId + "\n历史画像: " + (existingProfile != null ? profileToString(existingProfile) : "无") + "\n行为数据: " + behaviorJson)
+        // 步骤3: 调用LLM分析画像（LLM会通过collectUserBehavior工具自动收集行为数据）
+        String systemPrompt = "你是一个资深的电商用户画像分析专家。你擅长根据用户的真实行为数据，分析用户特征并生成精准的用户画像。\n" +
+                "你可以使用 collectUserBehavior 工具收集用户的真实行为数据。" +
+                "\n请先调用工具收集数据，再基于收集到的数据（浏览、购买、加购、搜索记录）进行全面的用户画像分析。" +
+                "\n分析维度包括：用户分群（segments）、偏好类目（preferredCategories）、价格区间（priceRange）、RFM模型评分（rfmScore）、实时标签（realTimeTags）。" +
+                "\n用户分群可选值：new_user（新用户）、active（活跃用户）、high_value（高价值用户）、price_sensitive（价格敏感）、churn_risk（流失风险）。" +
+                "\n\n输出JSON格式示例：" +
+                "\n{\"segments\":[\"active\",\"price_sensitive\"],\"preferredCategories\":[\"电子产品\",\"图书\"],\"priceRange\":[100.0,5000.0],\"rfmScore\":{\"recency\":0.8,\"frequency\":0.6,\"monetary\":0.7},\"realTimeTags\":{\"近期搜索\":\"手机\",\"活跃时段\":\"晚上\"}}" +
+                "\n请确保输出符合以上JSON格式，字段不能缺失。若某个维度无法判断给出合理的默认值。";
+
+        String userMessage = "用户ID: " + userId +
+                "\n历史画像: " + (existingProfile != null ? profileToString(existingProfile) : "无") +
+                "\n请先使用 collectUserBehavior 工具收集该用户的行为数据，然后进行画像分析。";
+
+        // 步骤4: 调用LLM分析画像
+        UserProfileAnalysisDTO analysis = chatClient.prompt()
+                .system(systemPrompt)
+                .tools(userBehaviorTool)
+                .user(userMessage)
                 .call()
-                .content();
+                .entity(UserProfileAnalysisDTO.class);
 
-        // 4. 解析并构建画像（结构化输出，无需手动parse JSON字符串）
-        UserProfileAnalysisDTO analysis = converter.convert(response);
-        UserProfile profile = buildProfileFromDto(userId, analysis, behavior);
+        // 步骤5: 构建画像实体
+        UserProfile profile = buildProfileFromDto(userId, analysis);
 
-        // 5. 保存画像到数据库
+        // 步骤6: 保存画像到数据库
         try {
             saveProfileToDb(userId, profile);
         } catch (Exception e) {
-            log.error("UserProfileAgent.execute 保存画像到数据库失败", e);
+            log.error("UserProfileAgent.execute - 保存画像到数据库失败, userId: {}", userId, e);
         }
 
+        // 步骤7: 返回结果
         Map<String, Object> data = new HashMap<>();
-        data.put("raw_analysis", response);
         data.put("profile", profile);
-        data.put("behavior_summary", behavior);
 
-        log.info("UserProfileAgent.execute 用户画像分析完成 userId={} segments={}", userId, profile.getSegments());
+        log.info("UserProfileAgent.execute - 用户画像分析完成, userId: {}, segments: {}", userId, profile.getSegments());
 
         return AgentResult.builder()
                 .agentName(name)
@@ -86,124 +99,66 @@ public class UserProfileAgent extends BaseAgent {
                 .build();
     }
 
-    /**
-     * 从数据库收集用户真实行为数据
-     */
-    private Map<String, Object> collectBehavior(String userId) {
-        Map<String, Object> behavior = new HashMap<>();
-        behavior.put("user_id", userId);
+    private UserProfile buildProfileFromDto(String userId, UserProfileAnalysisDTO dto) {
+        if (Objects.isNull(dto)) {
+            log.warn("UserProfileAgent.buildProfileFromDto - DTO为空，使用兜底画像, userId: {}", userId);
+            return fallbackProfile(userId);
+        }
 
         try {
-            // 最近浏览记录
-            List<UserBehavior> recentBehaviors = userBehaviorService.listRecentByUserId(userId, 50);
-
-            // 按行为类型分组
-            List<String> recentViews = recentBehaviors.stream()
-                    .filter(b -> "view".equals(b.getBehaviorType()))
-                    .map(UserBehavior::getProductId)
-                    .filter(Objects::nonNull)
-                    .distinct()
-                    .limit(10)
-                    .collect(Collectors.toList());
-
-            List<String> recentPurchases = recentBehaviors.stream()
-                    .filter(b -> "purchase".equals(b.getBehaviorType()))
-                    .map(UserBehavior::getProductId)
-                    .filter(Objects::nonNull)
-                    .distinct()
-                    .limit(10)
-                    .collect(Collectors.toList());
-
-            List<String> recentCarts = recentBehaviors.stream()
-                    .filter(b -> "cart".equals(b.getBehaviorType()))
-                    .map(UserBehavior::getProductId)
-                    .filter(Objects::nonNull)
-                    .distinct()
-                    .limit(5)
-                    .collect(Collectors.toList());
-
-            List<String> searchKeywords = recentBehaviors.stream()
-                    .map(UserBehavior::getSearchKeyword)
-                    .filter(Objects::nonNull)
-                    .distinct()
-                    .limit(10)
-                    .collect(Collectors.toList());
-
-            behavior.put("recent_views", recentViews);
-            behavior.put("recent_purchases", recentPurchases);
-            behavior.put("recent_carts", recentCarts);
-            behavior.put("search_keywords", searchKeywords);
-            behavior.put("total_behavior_count", recentBehaviors.size());
-            behavior.put("view_count_7d", recentViews.size());
-            behavior.put("purchase_count_30d", recentPurchases.size());
-
-            // 如果有购买，计算平均订单金额（简化）
-            if (!recentPurchases.isEmpty()) {
-                behavior.put("purchase_count", recentPurchases.size());
+            List<String> segments = dto.getSegments();
+            if (CollectionUtils.isEmpty(segments)) {
+                segments = List.of(DEFAULT_SEGMENT);
             }
 
-            log.info("UserProfileAgent.collectBehavior 用户={} 行为数据: 浏览{}条 购买{}条 搜索{}个关键词",
-                    userId, recentViews.size(), recentPurchases.size(), searchKeywords.size());
+            List<String> categories = dto.getPreferredCategories();
+            String categoryStr = !CollectionUtils.isEmpty(categories) ? String.join(",", categories) : "";
 
-        } catch (Exception e) {
-            log.warn("UserProfileAgent.collectBehavior 读取用户行为失败: {}", e.getMessage());
-            behavior.put("recent_views", List.of());
-            behavior.put("recent_purchases", List.of());
-            behavior.put("search_keywords", List.of());
-        }
+            List<Double> priceRange = dto.getPriceRange();
+            double priceMin = DEFAULT_PRICE_MIN;
+            double priceMax = DEFAULT_PRICE_MAX;
+            if (!CollectionUtils.isEmpty(priceRange) && priceRange.size() >= 2) {
+                priceMin = priceRange.get(0);
+                priceMax = priceRange.get(1);
+            }
 
-        return behavior;
-    }
-
-    /**
-     * 从结构化DTO构建 UserProfile 模型
-     */
-    private UserProfile buildProfileFromDto(String userId, UserProfileAnalysisDTO dto, Map<String, Object> behavior) {
-        if (dto == null) {
-            return fallbackProfile(userId, behavior);
-        }
-        try {
-            List<String> segments = dto.getSegments() != null ? dto.getSegments() : List.of("active");
-            List<String> categories = dto.getPreferredCategories() != null ? dto.getPreferredCategories() : List.of();
-            List<Double> priceRange = dto.getPriceRange() != null && dto.getPriceRange().size() >= 2
-                    ? dto.getPriceRange() : List.of(0.0, 10000.0);
             Map<String, Double> rfmScore = dto.getRfmScore();
 
             return UserProfile.builder()
                     .userId(userId)
-                    .segments(segments != null ? String.join(",", segments) : "active")
-                    .preferredCategories(categories != null ? String.join(",", categories) : "")
-                    .priceRangeMin(BigDecimal.valueOf(priceRange.get(0)))
-                    .priceRangeMax(BigDecimal.valueOf(priceRange.get(1)))
+                    .segments(String.join(",", segments))
+                    .preferredCategories(categoryStr)
+                    .priceRangeMin(BigDecimal.valueOf(priceMin))
+                    .priceRangeMax(BigDecimal.valueOf(priceMax))
                     .rfmRecency(rfmScore != null ? BigDecimal.valueOf(rfmScore.getOrDefault("recency", 0.5)) : BigDecimal.valueOf(0.5))
                     .rfmFrequency(rfmScore != null ? BigDecimal.valueOf(rfmScore.getOrDefault("frequency", 0.5)) : BigDecimal.valueOf(0.5))
                     .rfmMonetary(rfmScore != null ? BigDecimal.valueOf(rfmScore.getOrDefault("monetary", 0.5)) : BigDecimal.valueOf(0.5))
                     .realTimeTags(dto.getRealTimeTags() != null ? dto.getRealTimeTags().toString() : "")
                     .build();
         } catch (Exception e) {
-            log.error("UserProfileAgent.buildProfileFromDto 构建失败 userId={}", userId, e);
-            return fallbackProfile(userId, behavior);
+            log.error("UserProfileAgent.buildProfileFromDto - 构建失败, userId: {}", userId, e);
+            return fallbackProfile(userId);
         }
     }
 
-    private UserProfile fallbackProfile(String userId, Map<String, Object> behavior) {
+    private UserProfile fallbackProfile(String userId) {
+        log.warn("UserProfileAgent.fallbackProfile - 使用兜底画像, userId: {}", userId);
         return UserProfile.builder()
                 .userId(userId)
-                .segments("active")
+                .segments(DEFAULT_SEGMENT)
                 .preferredCategories("")
                 .build();
     }
 
-    /**
-     * 将画像保存到数据库
-     */
     private void saveProfileToDb(String userId, UserProfile profile) {
         userProfileService.saveOrUpdateProfile(profile);
-        log.info("UserProfileAgent.saveProfileToDb 用户画像已保存 userId={}", userId);
+        log.info("UserProfileAgent.saveProfileToDb - 用户画像已保存, userId: {}", userId);
     }
 
     private String profileToString(UserProfile entity) {
-        if (entity == null) return "无";
+        if (Objects.isNull(entity)) {
+            return "无";
+        }
         return String.format("分群=%s, 偏好类目=%s, 价格范围=%s-%s",
                 entity.getSegments(), entity.getPreferredCategories(),
                 entity.getPriceRangeMin(), entity.getPriceRangeMax());
