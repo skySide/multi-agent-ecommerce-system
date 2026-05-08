@@ -6,6 +6,8 @@ import com.ecommerce.dto.ConversationRequestDTO;
 import com.ecommerce.model.ConversationRequest;
 import com.ecommerce.model.ConversationResponse;
 import com.ecommerce.service.ConversationService;
+import com.ecommerce.vo.SessionCreateVO;
+import com.ecommerce.vo.SessionEndVO;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
@@ -70,11 +72,14 @@ public class ConversationController {
      * 创建新会话
      */
     @PostMapping("/session")
-    public Result<Map<String, String>> createSession(@RequestParam @NotBlank String userId) {
+    public Result<SessionCreateVO> createSession(@RequestParam @NotBlank String userId) {
         log.info("ConversationController.createSession, 用户: {}", userId);
         String sessionId = conversationService.createSession(userId);
         log.info("ConversationController.createSession, 会话: {}", sessionId);
-        return Result.success(Map.of("sessionId", sessionId, "userId", userId));
+        return Result.success(SessionCreateVO.builder()
+                .sessionId(sessionId)
+                .userId(userId)
+                .build());
     }
 
     /**
@@ -91,12 +96,15 @@ public class ConversationController {
      * 结束会话
      */
     @DeleteMapping("/session/{sessionId}")
-    public Result<Map<String, Object>> endSession(@PathVariable String sessionId) {
+    public Result<SessionEndVO> endSession(@PathVariable String sessionId) {
         log.info("ConversationController.endSession, 会话: {}", sessionId);
         boolean success = conversationService.endSession(sessionId);
         log.info("ConversationController.endSession, 结果: {}", success);
         if (success) {
-            return Result.success(Map.of("sessionId", sessionId, "success", success));
+            return Result.success(SessionEndVO.builder()
+                    .sessionId(sessionId)
+                    .success(true)
+                    .build());
         }
         return Result.error(ErrorCode.CONVERSATION_ERROR, "结束会话失败");
     }

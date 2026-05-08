@@ -1,5 +1,6 @@
 package com.ecommerce.vo;
 
+import com.ecommerce.vo.MarketingCopyVO;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -17,7 +18,7 @@ public class RecommendResponseVO {
     private String requestId;
     private String userId;
     private List<ProductVO> productVOList;
-    private List<Map<String, String>> marketingCopies;
+    private List<MarketingCopyVO> marketingCopies;
     private String experimentGroup;
     private Map<String, AgentResultVO> agentResults;
     private double totalLatencyMs;

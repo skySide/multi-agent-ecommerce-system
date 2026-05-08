@@ -2,8 +2,7 @@ package com.ecommerce.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.ecommerce.entity.ChatFeedback;
-
-import java.util.Map;
+import com.ecommerce.vo.SatisfactionStatsVO;
 
 /**
  * AI回复反馈服务接口
@@ -29,7 +28,7 @@ public interface ChatFeedbackService extends IService<ChatFeedback> {
      *
      * @return 统计结果
      */
-    Map<String, Object> getSatisfactionStats();
+    SatisfactionStatsVO getSatisfactionStats();
 
     /**
      * 获取用户反馈历史
@@ -37,5 +36,5 @@ public interface ChatFeedbackService extends IService<ChatFeedback> {
      * @param userId 用户ID
      * @return 反馈列表
      */
-    Map<String, Object> getUserFeedbackStats(String userId);
+    SatisfactionStatsVO getUserFeedbackStats(String userId);
 }

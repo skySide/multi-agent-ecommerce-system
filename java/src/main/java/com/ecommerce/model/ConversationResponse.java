@@ -1,10 +1,11 @@
 package com.ecommerce.model;
 
+import com.ecommerce.entity.Product;
+import com.ecommerce.vo.MarketingCopyVO;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import com.ecommerce.entity.Product;
 
 import java.time.Instant;
 import java.util.List;
@@ -28,7 +29,7 @@ public class ConversationResponse {
     /** 推荐商品列表（使用 entity.Product 以包含完整字段如 mainImage） */
     private List<Product> recommendedProducts;
 
-    private List<Map<String, String>> marketingCopies;
+    private List<MarketingCopyVO> marketingCopies;
 
     private Map<String, Object> extractedInfo;
 

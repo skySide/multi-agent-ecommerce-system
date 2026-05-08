@@ -3,6 +3,7 @@ package com.ecommerce.agent;
 import com.ecommerce.entity.Product;
 import com.ecommerce.model.AgentResult;
 import com.ecommerce.service.ProductService;
+import com.ecommerce.vo.StockAlertVO;
 import jakarta.annotation.Resource;
 import org.springframework.stereotype.Component;
 
@@ -39,7 +40,7 @@ public class InventoryAgent extends BaseAgent {
         List<Product> products = productService.listByProductIds(productIds);
 
         List<String> available = new ArrayList<>();
-        List<Map<String, Object>> alerts = new ArrayList<>();
+        List<StockAlertVO> alerts = new ArrayList<>();
         Map<String, Integer> purchaseLimits = new HashMap<>();
 
         for (Product product : products) {
@@ -52,22 +53,22 @@ public class InventoryAgent extends BaseAgent {
             available.add(product.getProductId());
 
             if (stock <= SAFETY_STOCK_THRESHOLD) {
-                alerts.add(Map.of(
-                        "product_id", product.getProductId(),
-                        "name", product.getProductName(),
-                        "current_stock", stock,
-                        "level", "critical",
-                        "action", "urgent_restock"
-                ));
+                alerts.add(StockAlertVO.builder()
+                        .productId(product.getProductId())
+                        .name(product.getProductName())
+                        .currentStock(stock)
+                        .level("critical")
+                        .action("urgent_restock")
+                        .build());
                 log.warn("InventoryAgent.execute 商品 {} 库存临界: {}", product.getProductId(), stock);
             } else if (stock <= LOW_STOCK_THRESHOLD) {
-                alerts.add(Map.of(
-                        "product_id", product.getProductId(),
-                        "name", product.getProductName(),
-                        "current_stock", stock,
-                        "level", "warning",
-                        "action", "plan_restock"
-                ));
+                alerts.add(StockAlertVO.builder()
+                        .productId(product.getProductId())
+                        .name(product.getProductName())
+                        .currentStock(stock)
+                        .level("warning")
+                        .action("plan_restock")
+                        .build());
             }
 
             Integer limit = calcPurchaseLimit(product, stock);

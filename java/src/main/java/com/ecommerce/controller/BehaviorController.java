@@ -5,13 +5,13 @@ import com.ecommerce.common.enums.ErrorCode;
 import com.ecommerce.dto.BehaviorRecordDTO;
 import com.ecommerce.entity.UserBehavior;
 import com.ecommerce.service.UserBehaviorService;
+import com.ecommerce.vo.BehaviorRecordVO;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 用户行为 Controller
@@ -29,7 +29,7 @@ public class BehaviorController {
      * 记录用户行为
      */
     @PostMapping("/record")
-    public Result<Map<String, Object>> recordBehavior(@RequestBody @Valid BehaviorRecordDTO dto) {
+    public Result<BehaviorRecordVO> recordBehavior(@RequestBody @Valid BehaviorRecordDTO dto) {
         log.info("BehaviorController.recordBehavior, 用户: {}, 行为: {}, 商品: {}",
                 dto.getUserId(), dto.getBehaviorType(), dto.getProductId());
         boolean success = userBehaviorService.recordBehavior(
@@ -41,7 +41,11 @@ public class BehaviorController {
         );
         log.info("BehaviorController.recordBehavior, 结果: {}", success);
         if (success) {
-            return Result.success(Map.of("userId", dto.getUserId(), "behaviorType", dto.getBehaviorType()));
+            return Result.success(BehaviorRecordVO.builder()
+                    .userId(dto.getUserId())
+                    .behaviorType(dto.getBehaviorType())
+                    .success(true)
+                    .build());
         }
         return Result.error(ErrorCode.BEHAVIOR_ERROR, "记录行为失败");
     }

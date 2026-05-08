@@ -2,9 +2,9 @@ package com.ecommerce.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.ecommerce.entity.UserFavorite;
+import com.ecommerce.vo.FavoriteItemVO;
 
 import java.util.List;
-import java.util.Map;
 
 public interface UserFavoriteService extends IService<UserFavorite> {
 
@@ -18,5 +18,5 @@ public interface UserFavoriteService extends IService<UserFavorite> {
     boolean isFavorited(String userId, String productId);
 
     /** 查询收藏列表（含商品信息） */
-    List<Map<String, Object>> getFavoritesWithProducts(String userId);
+    List<FavoriteItemVO> getFavoritesWithProducts(String userId);
 }

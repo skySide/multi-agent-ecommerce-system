@@ -5,6 +5,7 @@ import com.ecommerce.common.enums.ErrorCode;
 import com.ecommerce.dto.ProductCreateDTO;
 import com.ecommerce.entity.Product;
 import com.ecommerce.service.ProductService;
+import com.ecommerce.vo.ProductCreateVO;
 import com.ecommerce.vo.ProductVO;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
@@ -99,7 +100,7 @@ public class ProductController {
      * 创建商品
      */
     @PostMapping
-    public Result<Map<String, String>> createProduct(@RequestBody @Valid ProductCreateDTO dto) {
+    public Result<ProductCreateVO> createProduct(@RequestBody @Valid ProductCreateDTO dto) {
         log.info("ProductController.createProduct, 商品名称: {}", dto.getProductName());
         // 转换为实体
         Product product = Product.builder()
@@ -122,7 +123,9 @@ public class ProductController {
         boolean success = productService.save(product);
         log.info("ProductController.createProduct, 结果: {}, productId: {}", success, product.getProductId());
         if (success) {
-            return Result.success(Map.of("productId", product.getProductId()));
+            return Result.success(ProductCreateVO.builder()
+                    .productId(product.getProductId())
+                    .build());
         }
         return Result.error(ErrorCode.PRODUCT_ERROR, "创建商品失败");
     }

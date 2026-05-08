@@ -2,13 +2,11 @@ package com.ecommerce.controller;
 
 import com.ecommerce.bootstrap.ProductDataGenerator;
 import com.ecommerce.common.Result;
+import com.ecommerce.vo.DataGeneratorResultVO;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * 商品数据生成控制器
@@ -32,7 +30,7 @@ public class DataGeneratorController {
      * @return 生成结果
      */
     @PostMapping("/generate-products")
-    public Result<Map<String, Object>> generateProducts(
+    public Result<DataGeneratorResultVO> generateProducts(
             @RequestParam(value = "countPerCategory", defaultValue = "20") int countPerCategory) {
 
         log.info("DataGeneratorController.generateProducts 触发商品数据生成, countPerCategory={}", countPerCategory);
@@ -45,13 +43,12 @@ public class DataGeneratorController {
         try {
             int totalGenerated = productDataGenerator.generateProducts(countPerCategory);
 
-            Map<String, Object> data = new HashMap<>();
-            data.put("totalGenerated", totalGenerated);
-            data.put("message", "成功生成 " + totalGenerated + " 件商品");
-
             log.info("DataGeneratorController.generateProducts 生成完成, 共{}件商品", totalGenerated);
 
-            return Result.success(data);
+            return Result.success(DataGeneratorResultVO.builder()
+                    .count(totalGenerated)
+                    .message("成功生成 " + totalGenerated + " 件商品")
+                    .build());
 
         } catch (Exception e) {
             log.error("DataGeneratorController.generateProducts 生成失败", e);
@@ -66,7 +63,7 @@ public class DataGeneratorController {
      * @return 更新结果
      */
     @PostMapping("/update-images")
-    public Result<Map<String, Object>> updateProductImages() {
+    public Result<DataGeneratorResultVO> updateProductImages() {
 
         log.info("DataGeneratorController.updateProductImages 开始更新商品图片");
 
@@ -78,13 +75,12 @@ public class DataGeneratorController {
         try {
             int updatedCount = productDataGenerator.updateAllProductImages();
 
-            Map<String, Object> data = new HashMap<>();
-            data.put("updatedCount", updatedCount);
-            data.put("message", "成功更新 " + updatedCount + " 件商品图片");
-
             log.info("DataGeneratorController.updateProductImages 更新完成, 共{}件商品", updatedCount);
 
-            return Result.success(data);
+            return Result.success(DataGeneratorResultVO.builder()
+                    .count(updatedCount)
+                    .message("成功更新 " + updatedCount + " 件商品图片")
+                    .build());
 
         } catch (Exception e) {
             log.error("DataGeneratorController.updateProductImages 更新失败", e);
@@ -98,11 +94,10 @@ public class DataGeneratorController {
      * @return 数据生成器配置状态
      */
     @GetMapping("/status")
-    public Result<Map<String, Object>> getStatus() {
-        Map<String, Object> data = new HashMap<>();
-        data.put("enabled", generatorEnabled);
-        data.put("message", generatorEnabled ? "数据生成功能已启用" : "数据生成功能未启用");
-
-        return Result.success(data);
+    public Result<DataGeneratorResultVO> getStatus() {
+        return Result.success(DataGeneratorResultVO.builder()
+                .enabled(generatorEnabled)
+                .message(generatorEnabled ? "数据生成功能已启用" : "数据生成功能未启用")
+                .build());
     }
 }

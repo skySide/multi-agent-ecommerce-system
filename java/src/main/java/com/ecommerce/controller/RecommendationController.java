@@ -11,6 +11,7 @@ import com.ecommerce.service.ABTestService;
 import com.ecommerce.service.ShoppingCartService;
 import com.ecommerce.service.UserFavoriteService;
 import com.ecommerce.vo.AgentResultVO;
+import com.ecommerce.vo.HealthCheckVO;
 import com.ecommerce.vo.ProductVO;
 import com.ecommerce.vo.RecommendResponseVO;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -128,14 +129,16 @@ public class RecommendationController {
     }
 
     private void populateUserFlags(List<ProductVO> vos, String userId) {
-        if (userId == null || userId.isEmpty() || vos == null || vos.isEmpty()) return;
+        if (userId == null || userId.isEmpty() || vos == null || vos.isEmpty()) {
+            return;
+        }
         try {
             Set<String> favIds = userFavoriteService.getFavoritesWithProducts(userId).stream()
-                    .map(m -> (String) m.get("productId"))
+                    .map(com.ecommerce.vo.FavoriteItemVO::getProductId)
                     .filter(Objects::nonNull)
                     .collect(Collectors.toSet());
             Set<String> cartIds = shoppingCartService.getCartWithProducts(userId).stream()
-                    .map(m -> (String) m.get("productId"))
+                    .map(com.ecommerce.vo.CartItemVO::getProductId)
                     .filter(Objects::nonNull)
                     .collect(Collectors.toSet());
             for (ProductVO vo : vos) {
@@ -153,9 +156,13 @@ public class RecommendationController {
      * 健康检查
      */
     @GetMapping("/health")
-    public Result<Map<String, String>> health() {
+    public Result<HealthCheckVO> health() {
         log.info("RecommendationController.health");
-        return Result.success(Map.of("status", "healthy", "language", "java", "version", "1.0.0"));
+        return Result.success(HealthCheckVO.builder()
+                .status("healthy")
+                .language("java")
+                .version("1.0.0")
+                .build());
     }
 
     /**

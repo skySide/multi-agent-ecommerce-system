@@ -141,8 +141,8 @@ public class SupervisorOrchestrator {
         agentResults.put("marketing_copy", copyResult);
 
         @SuppressWarnings("unchecked")
-        List<Map<String, String>> copies = copyResult.getData() != null
-                ? (List<Map<String, String>>) copyResult.getData().get("copies") : List.of();
+        List<com.ecommerce.vo.MarketingCopyVO> copies = copyResult.getData() != null
+                ? (List<com.ecommerce.vo.MarketingCopyVO>) copyResult.getData().get("copies") : List.of();
 
         double totalLatency = (System.nanoTime() - start) / 1_000_000.0;
         log.info("SupervisorOrchestrator.recommend complete request={} latency={:.1f}ms products={} experiment={}",

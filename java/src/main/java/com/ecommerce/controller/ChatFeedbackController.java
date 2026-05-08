@@ -3,12 +3,12 @@ package com.ecommerce.controller;
 import com.ecommerce.common.Result;
 import com.ecommerce.dto.FeedbackRequestDTO;
 import com.ecommerce.service.ChatFeedbackService;
+import com.ecommerce.vo.FeedbackResultVO;
+import com.ecommerce.vo.SatisfactionStatsVO;
 import jakarta.annotation.Resource;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Map;
 
 /**
  * AI回复反馈控制器
@@ -29,7 +29,7 @@ public class ChatFeedbackController {
      * @return 操作结果
      */
     @PostMapping("/feedback")
-    public Result<Map<String, Object>> submitFeedback(@RequestBody @Valid FeedbackRequestDTO dto) {
+    public Result<FeedbackResultVO> submitFeedback(@RequestBody @Valid FeedbackRequestDTO dto) {
 
         log.info("ChatFeedbackController.submitFeedback 用户={} 会话={} 索引={} 评分={}",
                 dto.getUserId(), dto.getSessionId(), dto.getMessageIndex(), dto.getRating());
@@ -43,10 +43,10 @@ public class ChatFeedbackController {
                 dto.getRating());
 
         if (success) {
-            return Result.success(Map.of(
-                    "message", dto.getRating() == 1 ? "感谢您的认可！" : "感谢您的反馈，我们会持续改进！",
-                    "rating", dto.getRating()
-            ));
+            return Result.success(FeedbackResultVO.builder()
+                    .message(dto.getRating() == 1 ? "感谢您的认可！" : "感谢您的反馈，我们会持续改进！")
+                    .rating(dto.getRating())
+                    .build());
         } else {
             return Result.error(500, "反馈提交失败");
         }
@@ -58,9 +58,9 @@ public class ChatFeedbackController {
      * @return 统计结果
      */
     @GetMapping("/feedback/stats")
-    public Result<Map<String, Object>> getSatisfactionStats() {
+    public Result<SatisfactionStatsVO> getSatisfactionStats() {
         log.info("ChatFeedbackController.getSatisfactionStats 获取满意度统计");
-        Map<String, Object> stats = chatFeedbackService.getSatisfactionStats();
+        SatisfactionStatsVO stats = chatFeedbackService.getSatisfactionStats();
         return Result.success(stats);
     }
 
@@ -71,9 +71,9 @@ public class ChatFeedbackController {
      * @return 反馈统计
      */
     @GetMapping("/feedback/user/{userId}")
-    public Result<Map<String, Object>> getUserFeedbackStats(@PathVariable String userId) {
+    public Result<SatisfactionStatsVO> getUserFeedbackStats(@PathVariable String userId) {
         log.info("ChatFeedbackController.getUserFeedbackStats 用户={}", userId);
-        Map<String, Object> stats = chatFeedbackService.getUserFeedbackStats(userId);
+        SatisfactionStatsVO stats = chatFeedbackService.getUserFeedbackStats(userId);
         return Result.success(stats);
     }
 }

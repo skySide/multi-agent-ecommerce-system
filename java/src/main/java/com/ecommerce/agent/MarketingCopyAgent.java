@@ -4,6 +4,7 @@ import com.ecommerce.entity.Product;
 import com.ecommerce.model.AgentResult;
 import com.ecommerce.entity.UserProfile;
 import com.ecommerce.service.ProductService;
+import com.ecommerce.vo.MarketingCopyVO;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
@@ -83,7 +84,7 @@ public class MarketingCopyAgent extends BaseAgent {
                 .call()
                 .content();
 
-        List<Map<String, String>> copies = parseCopies(response);
+        List<MarketingCopyVO> copies = parseCopies(response);
         copies = copies.stream().map(this::complianceCheck).collect(Collectors.toList());
 
         // 确保每个商品都有文案（兜底）
@@ -131,15 +132,15 @@ public class MarketingCopyAgent extends BaseAgent {
     /**
      * 确保每个商品都有文案，没有则生成默认文案
      */
-    private List<Map<String, String>> ensureAllProductsHaveCopy(List<Product> products, List<Map<String, String>> copies) {
+    private List<MarketingCopyVO> ensureAllProductsHaveCopy(List<Product> products, List<MarketingCopyVO> copies) {
         Map<String, String> copyMap = copies.stream()
                 .collect(Collectors.toMap(
-                        c -> c.getOrDefault("product_id", ""),
-                        c -> c.getOrDefault("copy", ""),
+                        MarketingCopyVO::getProductId,
+                        MarketingCopyVO::getCopy,
                         (a, b) -> a
                 ));
 
-        List<Map<String, String>> result = new ArrayList<>();
+        List<MarketingCopyVO> result = new ArrayList<>();
         for (Product product : products) {
             String pid = product.getProductId();
             String copy = copyMap.get(pid);
@@ -149,10 +150,10 @@ public class MarketingCopyAgent extends BaseAgent {
                         product.getBrand(),
                         product.getPrice() != null ? product.getPrice().doubleValue() : 0);
             }
-            Map<String, String> item = new HashMap<>();
-            item.put("product_id", pid);
-            item.put("copy", copy);
-            result.add(item);
+            result.add(MarketingCopyVO.builder()
+                    .productId(pid)
+                    .copy(copy)
+                    .build());
         }
         return result;
     }
@@ -166,27 +167,34 @@ public class MarketingCopyAgent extends BaseAgent {
         return "active";
     }
 
-    private List<Map<String, String>> parseCopies(String raw) {
+    private List<MarketingCopyVO> parseCopies(String raw) {
         try {
             String cleaned = raw.trim();
             if (cleaned.startsWith("```")) {
                 cleaned = cleaned.substring(cleaned.indexOf('\n') + 1);
                 cleaned = cleaned.substring(0, cleaned.lastIndexOf("```"));
             }
-            return objectMapper.readValue(cleaned, new TypeReference<>() {});
+            List<Map<String, String>> rawList = objectMapper.readValue(cleaned, new TypeReference<>() {});
+            return rawList.stream()
+                    .map(m -> MarketingCopyVO.builder()
+                            .productId(m.get("product_id"))
+                            .copy(m.get("copy"))
+                            .build())
+                    .collect(Collectors.toList());
         } catch (Exception e) {
             log.warn("MarketingCopyAgent.parseCopies 解析失败: {}", e.getMessage());
             return List.of();
         }
     }
 
-    private Map<String, String> complianceCheck(Map<String, String> copyItem) {
-        String text = copyItem.getOrDefault("copy", "");
+    private MarketingCopyVO complianceCheck(MarketingCopyVO copyItem) {
+        String text = copyItem.getCopy();
         for (String word : FORBIDDEN_WORDS) {
             text = text.replace(word, "***");
         }
-        Map<String, String> result = new HashMap<>(copyItem);
-        result.put("copy", text);
-        return result;
+        return MarketingCopyVO.builder()
+                .productId(copyItem.getProductId())
+                .copy(text)
+                .build();
     }
 }

@@ -1,11 +1,10 @@
 package com.ecommerce.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
-import com.ecommerce.entity.Product;
 import com.ecommerce.entity.ShoppingCart;
+import com.ecommerce.vo.CartItemVO;
 
 import java.util.List;
-import java.util.Map;
 
 public interface ShoppingCartService extends IService<ShoppingCart> {
 
@@ -22,7 +21,7 @@ public interface ShoppingCartService extends IService<ShoppingCart> {
     boolean clearCart(String userId);
 
     /** 查询购物车（含商品信息） */
-    List<Map<String, Object>> getCartWithProducts(String userId);
+    List<CartItemVO> getCartWithProducts(String userId);
 
     /** 是否已在购物车 */
     boolean isInCart(String userId, String productId);

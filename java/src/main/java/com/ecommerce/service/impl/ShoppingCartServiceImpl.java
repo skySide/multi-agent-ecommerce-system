@@ -6,11 +6,13 @@ import com.ecommerce.entity.ShoppingCart;
 import com.ecommerce.mapper.ProductMapper;
 import com.ecommerce.mapper.ShoppingCartMapper;
 import com.ecommerce.service.ShoppingCartService;
+import com.ecommerce.vo.CartItemVO;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
 @Slf4j
 @Service
@@ -55,26 +57,26 @@ public class ShoppingCartServiceImpl extends ServiceImpl<ShoppingCartMapper, Sho
     }
 
     @Override
-    public List<Map<String, Object>> getCartWithProducts(String userId) {
+    public List<CartItemVO> getCartWithProducts(String userId) {
         List<ShoppingCart> cartItems = shoppingCartMapper.findByUserId(userId);
-        List<Map<String, Object>> result = new ArrayList<>();
+        List<CartItemVO> result = new ArrayList<>();
         for (ShoppingCart item : cartItems) {
-            Map<String, Object> entry = new HashMap<>();
-            entry.put("cartId", item.getId());
-            entry.put("productId", item.getProductId());
-            entry.put("quantity", item.getQuantity());
-            entry.put("addedTime", item.getCreateTime());
-            // 查商品信息
             Product product = productMapper.findByProductId(item.getProductId());
             if (product != null) {
-                entry.put("productName", product.getProductName());
-                entry.put("price", product.getPrice());
-                entry.put("originalPrice", product.getOriginalPrice());
-                entry.put("mainImage", product.getMainImage());
-                entry.put("brand", product.getBrand());
-                entry.put("stock", product.getStock());
+                CartItemVO vo = CartItemVO.builder()
+                        .cartId(item.getId())
+                        .productId(item.getProductId())
+                        .quantity(item.getQuantity())
+                        .addedTime(item.getCreateTime())
+                        .productName(product.getProductName())
+                        .price(product.getPrice())
+                        .originalPrice(product.getOriginalPrice())
+                        .mainImage(product.getMainImage())
+                        .brand(product.getBrand())
+                        .stock(product.getStock())
+                        .build();
+                result.add(vo);
             }
-            result.add(entry);
         }
         return result;
     }

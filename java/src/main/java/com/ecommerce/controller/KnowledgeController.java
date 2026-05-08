@@ -2,6 +2,8 @@ package com.ecommerce.controller;
 
 import com.ecommerce.common.Result;
 import com.ecommerce.service.DocumentVectorService;
+import com.ecommerce.vo.KnowledgeSearchResultVO;
+import com.ecommerce.vo.KnowledgeUploadVO;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -9,15 +11,12 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -44,7 +43,7 @@ public class KnowledgeController {
      * @return 上传结果
      */
     @PostMapping("/upload")
-    public Result<Map<String, Object>> uploadKnowledge(
+    public Result<KnowledgeUploadVO> uploadKnowledge(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "docType", defaultValue = "general") String docType) {
 
@@ -92,18 +91,16 @@ public class KnowledgeController {
             String source = docType + "_" + fileId;
             documentVectorService.addDocumentToKnowledgeBase(content, source, docType);
 
-            // 5. 返回结果
-            Map<String, Object> data = new HashMap<>();
-            data.put("fileId", fileId);
-            data.put("filename", filename);
-            data.put("docType", docType);
-            data.put("contentLength", content.length());
-            data.put("source", source);
-
             log.info("KnowledgeController.uploadKnowledge 上传成功, fileId={}, contentLength={}",
                     fileId, content.length());
 
-            return Result.success(data);
+            return Result.success(KnowledgeUploadVO.builder()
+                    .fileId(fileId)
+                    .filename(filename)
+                    .docType(docType)
+                    .contentLength(content.length())
+                    .source(source)
+                    .build());
 
         } catch (Exception e) {
             log.error("KnowledgeController.uploadKnowledge 上传失败", e);
@@ -119,7 +116,7 @@ public class KnowledgeController {
      * @return 添加结果
      */
     @PostMapping("/add-text")
-    public Result<Map<String, Object>> addText(
+    public Result<KnowledgeUploadVO> addText(
             @RequestParam("content") String content,
             @RequestParam(value = "docType", defaultValue = "general") String docType) {
 
@@ -137,15 +134,14 @@ public class KnowledgeController {
 
             documentVectorService.addDocumentToKnowledgeBase(content, source, docType);
 
-            Map<String, Object> data = new HashMap<>();
-            data.put("fileId", fileId);
-            data.put("docType", docType);
-            data.put("contentLength", content.length());
-            data.put("source", source);
-
             log.info("KnowledgeController.addText 添加成功, fileId={}", fileId);
 
-            return Result.success(data);
+            return Result.success(KnowledgeUploadVO.builder()
+                    .fileId(fileId)
+                    .docType(docType)
+                    .contentLength(content.length())
+                    .source(source)
+                    .build());
 
         } catch (Exception e) {
             log.error("KnowledgeController.addText 添加失败", e);
@@ -161,7 +157,7 @@ public class KnowledgeController {
      * @return 搜索结果
      */
     @GetMapping("/search")
-    public Result<List<Map<String, Object>>> searchKnowledge(
+    public Result<List<KnowledgeSearchResultVO>> searchKnowledge(
             @RequestParam("query") String query,
             @RequestParam(value = "topK", defaultValue = "5") int topK) {
 
@@ -176,13 +172,11 @@ public class KnowledgeController {
             List<org.springframework.ai.document.Document> docs =
                     documentVectorService.searchKnowledgeBase(query, topK);
 
-            List<Map<String, Object>> results = docs.stream()
-                    .map(doc -> {
-                        Map<String, Object> item = new HashMap<>();
-                        item.put("content", doc.getText());
-                        item.put("metadata", doc.getMetadata());
-                        return item;
-                    })
+            List<KnowledgeSearchResultVO> results = docs.stream()
+                    .map(doc -> KnowledgeSearchResultVO.builder()
+                            .content(doc.getText())
+                            .metadata(doc.getMetadata())
+                            .build())
                     .collect(Collectors.toList());
 
             log.info("KnowledgeController.searchKnowledge 搜索完成, 结果数量={}", results.size());
@@ -203,7 +197,7 @@ public class KnowledgeController {
      * @return 上传结果
      */
     @PostMapping("/batch-upload")
-    public Result<Map<String, Object>> batchUpload(
+    public Result<KnowledgeUploadVO> batchUpload(
             @RequestParam("files") MultipartFile[] files,
             @RequestParam(value = "docType", defaultValue = "general") String docType) {
 
@@ -216,7 +210,7 @@ public class KnowledgeController {
 
         for (MultipartFile file : files) {
             try {
-                Result<Map<String, Object>> result = uploadKnowledge(file, docType);
+                Result<KnowledgeUploadVO> result = uploadKnowledge(file, docType);
                 if (result.getCode() == 200) {
                     successCount++;
                 } else {
@@ -231,17 +225,14 @@ public class KnowledgeController {
             }
         }
 
-        Map<String, Object> data = new HashMap<>();
-        data.put("total", files.length);
-        data.put("success", successCount);
-        data.put("fail", failCount);
-        if (failCount > 0) {
-            data.put("errors", errorMsg.toString());
-        }
-
         log.info("KnowledgeController.batchUpload 批量上传完成, 成功={}, 失败={}",
                 successCount, failCount);
 
-        return Result.success(data);
+        return Result.success(KnowledgeUploadVO.builder()
+                .total(files.length)
+                .success(successCount)
+                .fail(failCount)
+                .errors(failCount > 0 ? errorMsg.toString() : null)
+                .build());
     }
 }

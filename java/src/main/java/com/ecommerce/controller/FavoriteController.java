@@ -1,14 +1,18 @@
 package com.ecommerce.controller;
 
 import com.ecommerce.common.Result;
+import com.ecommerce.dto.AddFavoriteDTO;
+import com.ecommerce.dto.RemoveFavoriteDTO;
 import com.ecommerce.service.UserBehaviorService;
 import com.ecommerce.service.UserFavoriteService;
+import com.ecommerce.vo.FavoriteItemVO;
+import com.ecommerce.vo.FavoriteOperationVO;
 import jakarta.annotation.Resource;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 收藏 Controller
@@ -25,42 +29,48 @@ public class FavoriteController {
 
     /** 查询收藏列表 */
     @GetMapping("/{userId}")
-    public Result<List<Map<String, Object>>> getFavorites(@PathVariable String userId) {
+    public Result<List<FavoriteItemVO>> getFavorites(@PathVariable String userId) {
         return Result.success(userFavoriteService.getFavoritesWithProducts(userId));
     }
 
     /** 添加收藏 */
     @PostMapping("/add")
-    public Result<Map<String, Object>> addFavorite(@RequestBody Map<String, String> body) {
-        String userId = body.get("userId");
-        String productId = body.get("productId");
-        boolean success = userFavoriteService.addFavorite(userId, productId);
+    public Result<FavoriteOperationVO> addFavorite(@RequestBody @Valid AddFavoriteDTO dto) {
+        boolean success = userFavoriteService.addFavorite(dto.getUserId(), dto.getProductId());
         try {
-            userBehaviorService.recordBehavior(userId, productId, "favorite", null, "product_detail");
+            userBehaviorService.recordBehavior(dto.getUserId(), dto.getProductId(), "favorite", null, "product_detail");
         } catch (Exception e) {
-            log.warn("记录收藏行为失败: {}", e.getMessage());
+            log.warn("FavoriteController.addFavorite - 记录收藏行为失败: {}", e.getMessage());
         }
-        return Result.success(Map.of("success", success, "favorited", true));
+        return Result.success(FavoriteOperationVO.builder()
+                .success(success)
+                .favorited(true)
+                .message("收藏成功")
+                .build());
     }
 
     /** 取消收藏 */
     @DeleteMapping("/remove")
-    public Result<Map<String, Object>> removeFavorite(@RequestBody Map<String, String> body) {
-        String userId = body.get("userId");
-        String productId = body.get("productId");
-        boolean success = userFavoriteService.removeFavorite(userId, productId);
+    public Result<FavoriteOperationVO> removeFavorite(@RequestBody @Valid RemoveFavoriteDTO dto) {
+        boolean success = userFavoriteService.removeFavorite(dto.getUserId(), dto.getProductId());
         try {
-            userBehaviorService.recordBehavior(userId, productId, "unfavorite", null, "product_detail");
+            userBehaviorService.recordBehavior(dto.getUserId(), dto.getProductId(), "unfavorite", null, "product_detail");
         } catch (Exception e) {
-            log.warn("记录取消收藏行为失败: {}", e.getMessage());
+            log.warn("FavoriteController.removeFavorite - 记录取消收藏行为失败: {}", e.getMessage());
         }
-        return Result.success(Map.of("success", success, "favorited", false));
+        return Result.success(FavoriteOperationVO.builder()
+                .success(success)
+                .favorited(false)
+                .message("取消收藏成功")
+                .build());
     }
 
     /** 检查是否已收藏 */
     @GetMapping("/check")
-    public Result<Map<String, Object>> checkFavorited(@RequestParam String userId, @RequestParam String productId) {
+    public Result<FavoriteOperationVO> checkFavorited(@RequestParam String userId, @RequestParam String productId) {
         boolean favorited = userFavoriteService.isFavorited(userId, productId);
-        return Result.success(Map.of("favorited", favorited));
+        return Result.success(FavoriteOperationVO.builder()
+                .favorited(favorited)
+                .build());
     }
 }

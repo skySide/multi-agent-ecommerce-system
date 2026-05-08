@@ -6,11 +6,13 @@ import com.ecommerce.entity.UserFavorite;
 import com.ecommerce.mapper.ProductMapper;
 import com.ecommerce.mapper.UserFavoriteMapper;
 import com.ecommerce.service.UserFavoriteService;
+import com.ecommerce.vo.FavoriteItemVO;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
 @Slf4j
 @Service
@@ -44,23 +46,24 @@ public class UserFavoriteServiceImpl extends ServiceImpl<UserFavoriteMapper, Use
     }
 
     @Override
-    public List<Map<String, Object>> getFavoritesWithProducts(String userId) {
+    public List<FavoriteItemVO> getFavoritesWithProducts(String userId) {
         List<UserFavorite> favorites = userFavoriteMapper.findByUserId(userId);
-        List<Map<String, Object>> result = new ArrayList<>();
+        List<FavoriteItemVO> result = new ArrayList<>();
         for (UserFavorite fav : favorites) {
-            Map<String, Object> entry = new HashMap<>();
-            entry.put("productId", fav.getProductId());
-            entry.put("favoriteTime", fav.getCreateTime());
             Product product = productMapper.findByProductId(fav.getProductId());
             if (product != null) {
-                entry.put("productName", product.getProductName());
-                entry.put("price", product.getPrice());
-                entry.put("originalPrice", product.getOriginalPrice());
-                entry.put("mainImage", product.getMainImage());
-                entry.put("brand", product.getBrand());
-                entry.put("rating", product.getRating());
+                FavoriteItemVO vo = FavoriteItemVO.builder()
+                        .productId(fav.getProductId())
+                        .favoriteTime(fav.getCreateTime())
+                        .productName(product.getProductName())
+                        .price(product.getPrice())
+                        .originalPrice(product.getOriginalPrice())
+                        .mainImage(product.getMainImage())
+                        .brand(product.getBrand())
+                        .rating(product.getRating())
+                        .build();
+                result.add(vo);
             }
-            result.add(entry);
         }
         return result;
     }

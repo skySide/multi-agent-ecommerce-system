@@ -15,8 +15,6 @@ import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
-
 /**
  * 用户 Controller
  */
@@ -69,15 +67,11 @@ public class UserController {
      * 用户注册
      */
     @PostMapping("/register")
-    public Result<Map<String, String>> register(@RequestBody @Valid UserCreateDTO dto) {
+    public Result<UserAuthVO> register(@RequestBody @Valid UserCreateDTO dto) {
         log.info("UserController.register, user: {}", dto.getUsername());
         try {
             UserAuthVO authVO = userService.register(dto);
-            return Result.success(Map.of(
-                    "userId", authVO.getUserId(),
-                    "token", authVO.getToken(),
-                    "username", authVO.getUsername()
-            ));
+            return Result.success(authVO);
         } catch (RuntimeException e) {
             return Result.error(ErrorCode.USER_ERROR, e.getMessage());
         }
@@ -87,15 +81,11 @@ public class UserController {
      * 用户登录
      */
     @PostMapping("/login")
-    public Result<Map<String, String>> login(@RequestBody @Valid LoginRequestDTO dto) {
+    public Result<UserAuthVO> login(@RequestBody @Valid LoginRequestDTO dto) {
         log.info("UserController.login, user: {}", dto.getUsername());
         try {
             UserAuthVO authVO = userService.login(dto);
-            return Result.success(Map.of(
-                    "userId", authVO.getUserId(),
-                    "token", authVO.getToken(),
-                    "username", authVO.getUsername()
-            ));
+            return Result.success(authVO);
         } catch (RuntimeException e) {
             return Result.error(ErrorCode.UNAUTHORIZED, e.getMessage());
         }
@@ -105,7 +95,7 @@ public class UserController {
      * 创建用户（兼容旧接口，内部调用注册逻辑）
      */
     @PostMapping
-    public Result<Map<String, String>> createUser(@RequestBody @Valid UserCreateDTO dto) {
+    public Result<UserAuthVO> createUser(@RequestBody @Valid UserCreateDTO dto) {
         return register(dto);
     }
 }

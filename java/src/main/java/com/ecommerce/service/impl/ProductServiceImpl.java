@@ -7,6 +7,8 @@ import com.ecommerce.mapper.ProductMapper;
 import com.ecommerce.service.ProductService;
 import com.ecommerce.service.ShoppingCartService;
 import com.ecommerce.service.UserFavoriteService;
+import com.ecommerce.vo.CartItemVO;
+import com.ecommerce.vo.FavoriteItemVO;
 import com.ecommerce.vo.ProductVO;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -170,14 +172,16 @@ public class ProductServiceImpl extends ServiceImpl<ProductMapper, Product> impl
      * 批量填充用户收藏/购物车标记
      */
     private void populateFlags(List<ProductVO> vos, String userId) {
-        if (userId == null || userId.isEmpty() || vos.isEmpty()) return;
+        if (userId == null || userId.isEmpty() || vos.isEmpty()) {
+            return;
+        }
         try {
             Set<String> favIds = userFavoriteService.getFavoritesWithProducts(userId).stream()
-                    .map(m -> (String) m.get("productId"))
+                    .map(FavoriteItemVO::getProductId)
                     .filter(Objects::nonNull)
                     .collect(Collectors.toSet());
             Set<String> cartIds = shoppingCartService.getCartWithProducts(userId).stream()
-                    .map(m -> (String) m.get("productId"))
+                    .map(CartItemVO::getProductId)
                     .filter(Objects::nonNull)
                     .collect(Collectors.toSet());
             for (ProductVO vo : vos) {

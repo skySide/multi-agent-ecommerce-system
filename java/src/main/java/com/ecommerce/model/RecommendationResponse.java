@@ -1,5 +1,6 @@
 package com.ecommerce.model;
 
+import com.ecommerce.vo.MarketingCopyVO;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -21,7 +22,7 @@ public class RecommendationResponse {
     /** 推荐商品列表（使用 entity.Product 以包含完整字段如 mainImage） */
     private List<com.ecommerce.entity.Product> products;
 
-    private List<Map<String, String>> marketingCopies;
+    private List<MarketingCopyVO> marketingCopies;
 
     private String experimentGroup;
 
