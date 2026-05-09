@@ -355,7 +355,218 @@ RAG的核心是"检索增强"，不让LLM凭空生成。用户问题先向量化
 
 ---
 
-### 亮点2: BaseAgent 重试 + 降级 + 熔断三位一体
+### 亮点2: Agent-to-Agent (A2A) 通信机制
+
+**面试问法：** "Agent 之间是怎么通信的？数据怎么传递？"
+
+这是面试中最容易被深入追问的技术点，需要详细解释。
+
+#### 2.1 A2A 通信架构图
+
+```
+                    ┌─────────────────────────────────────┐
+                    │      SupervisorOrchestrator         │
+                    │      (中央编排器，负责协调)          │
+                    └──────────────┬──────────────────────┘
+                                   │
+          ┌────────────────────────┼────────────────────────┐
+          │                        │                        │
+          ▼                        ▼                        ▼
+   ┌──────────────┐         ┌──────────────┐         ┌──────────────┐
+   │UserProfile   │         │ProductRec    │         │Inventory     │
+   │Agent         │         │Agent         │         │Agent         │
+   └──────┬───────┘         └──────┬───────┘         └──────┬───────┘
+          │                        │                        │
+          │     AgentResult        │     AgentResult        │
+          │     ┌─────────────┐    │     ┌─────────────┐    │
+          └────►│ success     │    └────►│ success     │◄───┘
+                │ data        │         │ data        │
+                │ confidence  │         │ confidence  │
+                │ latencyMs   │         │ latencyMs   │
+                │ error       │         │ error       │
+                └──────┬──────┘         └──────┬──────┘
+                       │                       │
+                       └───────────┬───────────┘
+                                   ▼
+                    ┌─────────────────────────────────────┐
+                    │      Supervisor 聚合结果             │
+                    │   Map<String, AgentResult>          │
+                    │   key = "user_profile"              │
+                    │   key = "product_recall"            │
+                    │   key = "rerank"                    │
+                    │   key = "inventory"                 │
+                    └─────────────────────────────────────┘
+```
+
+#### 2.2 核心数据结构：AgentResult
+
+Agent 之间的通信**不通过消息队列**，而是通过**统一的数据结构 AgentResult** 在内存中传递：
+
+```java
+@Data
+@Builder
+public class AgentResult {
+    /** Agent 名称，用于日志和调试 */
+    private String agentName;
+    
+    /** 执行是否成功（关键：用于判断是否需要降级） */
+    @Builder.Default
+    private boolean success = true;
+    
+    /** 执行耗时（用于监控和性能分析） */
+    @Builder.Default
+    private double latencyMs = 0.0;
+    
+    /** 错误信息（失败时记录原因） */
+    private String error;
+    
+    /** 核心数据载体（Map 结构，灵活承载不同类型数据） */
+    private Map<String, Object> data;
+    
+    /** 置信度（0-1，用于结果质量评估） */
+    @Builder.Default
+    private double confidence = 1.0;
+}
+```
+
+#### 2.3 A2A 通信流程详解
+
+**Phase 1: 画像 Agent → 召回 Agent（间接通信）**
+
+```java
+// SupervisorOrchestrator.java
+
+// Step 1: 启动画像 Agent
+CompletableFuture<AgentResult> profileFuture = userProfileAgent.runAsync(
+    Map.of("userId", request.getUserId())  // 输入参数
+);
+
+// Step 2: 启动召回 Agent（与画像并行）
+CompletableFuture<AgentResult> recFuture = productRecAgent.runAsync(
+    Map.of("userId", request.getUserId(), "numItems", request.getNumItems() * 2)
+);
+
+// Step 3: 等待并获取结果
+AgentResult profileResult = profileFuture.join();
+AgentResult recResult = recFuture.join();
+
+// Step 4: 从 AgentResult 中提取数据
+UserProfile profile = profileResult.getData() != null
+    ? (UserProfile) profileResult.getData().get("profile")  // 从 data Map 中取
+    : null;
+
+List<Product> rawProducts = recResult.getData() != null
+    ? (List<Product>) recResult.getData().get("products")
+    : List.of();
+```
+
+**Phase 2: 画像 → 召回 Agent（直接通信，传递画像数据）**
+
+```java
+// Step 5: 将画像 Agent 的结果，作为召回 Agent 的输入
+CompletableFuture<AgentResult> rerankFuture;
+if (hasUsableProfile(profile)) {
+    rerankFuture = productRecAgent.runAsync(
+        Map.of(
+            "userId", request.getUserId(),
+            "userProfile", profile,      // ← 画像数据传递给召回 Agent
+            "numItems", request.getNumItems()
+        )
+    );
+}
+```
+
+**关键点：Agent 之间不直接调用，而是通过 Supervisor 作为中介传递数据。**
+
+#### 2.4 各 Agent 的输入输出契约
+
+| Agent | 输入 (Map<String, Object>) | 输出 (AgentResult.data) |
+|-------|---------------------------|-------------------------|
+| UserProfileAgent | `userId` | `profile`: UserProfile 对象<br>`behavior_summary`: 行为摘要 |
+| ProductRecAgent (召回) | `userId`, `numItems` | `products`: List<Product><br>`recall_strategy`: 召回策略 |
+| ProductRecAgent (重排) | `userId`, `userProfile`, `numItems` | `products`: List<Product> |
+| InventoryAgent | `productIds`: List<String> | `available_products`: List<String><br>`low_stock_alerts`: List<StockAlert><br>`purchase_limits`: Map<String, Integer> |
+| MarketingCopyAgent | `userProfile`, `productIds` | `copies`: List<MarketingCopy><br>`template_used`: 模板名称 |
+
+#### 2.5 为什么不用消息队列？
+
+**面试追问：** "为什么不直接用 Kafka 或 RabbitMQ 来做 Agent 通信？"
+
+| 方案 | 优点 | 缺点 |
+|------|------|------|
+| **CompletableFuture（当前方案）** | 零网络延迟、简单可靠、易于调试 | 单机无法水平扩展 |
+| **消息队列（Kafka）** | 可水平扩展、支持持久化 | 网络延迟 + 序列化开销，增加复杂度 |
+| **Actor 模型（Akka）** | 天然支持分布式、容错好 | 学习曲线陡、运维复杂 |
+
+**当前方案的选择理由：**
+1. **延迟敏感**：推荐系统要求 P99 < 2s，消息队列的网络 + 序列化开销不可接受
+2. **数据量小**：Agent 之间传递的是用户画像、商品列表，内存足够
+3. **强一致性**：CompletableFuture.join() 保证结果同步返回，无需处理消息丢失
+
+**生产环境升级路径：**
+- 如果 QPS 增长到单机无法支撑，可将 Agent 部署为独立微服务
+- 使用 gRPC 或 RSocket 替代 CompletableFuture，保持同步语义
+
+#### 2.6 A2A 通信的错误处理
+
+```java
+// BaseAgent.java - 所有 Agent 的基类
+
+public CompletableFuture<AgentResult> runAsync(Map<String, Object> params) {
+    return CompletableFuture.supplyAsync(() -> {
+        callCount.incrementAndGet();
+        long start = System.nanoTime();
+        int attempt = 0;
+        Exception lastError = null;
+
+        // 指数退避重试
+        while (attempt < maxRetries) {
+            try {
+                AgentResult result = execute(params);
+                return result;  // 成功则返回
+            } catch (Exception e) {
+                lastError = e;
+                attempt++;
+                Thread.sleep((long) (500 * Math.pow(2, attempt - 1)));  // 500ms, 1000ms, 2000ms
+            }
+        }
+
+        // 重试全部失败，返回降级结果（不抛异常！）
+        return fallback(latencyMs, lastError);
+    });
+}
+
+// 降级结果：success=false，但 data 可能为空或兜底数据
+protected AgentResult fallback(double latencyMs, Exception e) {
+    return AgentResult.builder()
+        .agentName(name)
+        .success(false)  // ← 关键标记
+        .latencyMs(latencyMs)
+        .error(e.getMessage())
+        .confidence(0.0)
+        .build();
+}
+```
+
+**Supervisor 如何处理失败结果：**
+
+```java
+// SupervisorOrchestrator.java
+
+AgentResult profileResult = profileFuture.join();
+
+// 检查 success 字段，决定是否使用降级策略
+if (!profileResult.isSuccess()) {
+    log.warn("画像 Agent 失败，使用默认画像");
+    profile = new UserProfile();  // 降级为默认画像
+} else {
+    profile = (UserProfile) profileResult.getData().get("profile");
+}
+```
+
+---
+
+### 亮点3: BaseAgent 重试 + 降级 + 熔断三位一体
 
 **面试问法：** "Agent 调用失败怎么办？如何保证系统稳定性？"
 
@@ -385,7 +596,109 @@ RAG的核心是"检索增强"，不让LLM凭空生成。用户问题先向量化
 
 ---
 
-### 亮点3: 三层记忆系统
+### 亮点4: 多路召回 + RRF 融合算法
+
+**面试问法：** "推荐系统怎么做召回？为什么要用 RRF 融合？"
+
+#### 4.1 四路召回架构
+
+```
+                    用户请求
+                       │
+                       ▼
+         ┌─────────────┼─────────────┐
+         │             │             │
+         ▼             ▼             ▼
+   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
+   │向量召回  │  │热销召回  │  │新品召回  │  │类目召回  │
+   │(Milvus)  │  │(MySQL)   │  │(MySQL)   │  │(MySQL)   │
+   │权重:0.4  │  │权重:0.2  │  │权重:0.2  │  │权重:0.2  │
+   └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘
+        │             │             │             │
+        ▼             ▼             ▼             ▼
+   [P1,P3,P5]    [P1,P2,P4]    [P3,P6,P7]    [P2,P5,P8]
+        │             │             │             │
+        └─────────────┴─────────────┴─────────────┘
+                           │
+                           ▼
+                    ┌──────────────┐
+                    │  RRF 融合    │
+                    │  合并去重    │
+                    └──────┬───────┘
+                           │
+                           ▼
+                    [P1,P2,P3,P4,P5,P6,P7,P8]
+```
+
+#### 4.2 RRF（Reciprocal Rank Fusion）算法详解
+
+**公式：**
+
+```
+RRF_score(d) = Σ (weight_i / (k + rank_i(d)))
+
+其中：
+- d: 商品
+- weight_i: 第 i 个通道的权重
+- k: 平滑常数（默认 60），避免排名靠前的商品分数过高
+- rank_i(d): 商品 d 在第 i 个通道中的排名（从 0 开始）
+```
+
+**代码实现：**
+
+```java
+private List<Product> mergeByRrf(Map<String, List<Product>> channelResult, int limit) {
+    Map<String, Product> productMap = new HashMap<>();
+    Map<String, Double> scores = new HashMap<>();
+
+    for (Map.Entry<String, List<Product>> entry : channelResult.entrySet()) {
+        String channel = entry.getKey();
+        List<Product> products = entry.getValue();
+        double weight = CHANNEL_WEIGHTS.getOrDefault(channel, 0.1);  // 向量0.4, 热销0.2, 新品0.2, 类目0.2
+        
+        for (int i = 0; i < products.size(); i++) {
+            Product p = products.get(i);
+            productMap.putIfAbsent(p.getProductId(), p);
+            
+            // RRF 公式核心
+            double inc = weight / (RRF_K + i + 1.0);  // k=60
+            scores.merge(p.getProductId(), inc, Double::sum);
+        }
+    }
+    
+    // 按分数降序排列
+    return scores.entrySet().stream()
+        .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
+        .limit(limit)
+        .map(e -> productMap.get(e.getKey()))
+        .collect(Collectors.toList());
+}
+```
+
+#### 4.3 为什么 RRF 比加权平均好？
+
+| 对比维度 | 加权平均 | RRF |
+|----------|----------|-----|
+| **量纲问题** | 向量相似度 [0,1]，销量 [0,10000]，量纲不统一，难以直接加权 | 只用排名位置，天然无量纲 |
+| **长尾商品** | 分数低则权重低，容易被忽略 | rank 衰减平缓，长尾商品仍有机会 |
+| **通道稳定性** | 需要各通道分数归一化，实现复杂 | 直接用排名，简单可靠 |
+
+**示例：**
+
+```
+商品 A: 向量召回 rank=0, 热销召回 rank=10
+商品 B: 向量召回 rank=5, 热销召回 rank=0
+
+RRF 计算:
+A = 0.4/(60+1) + 0.2/(60+11) = 0.00656 + 0.00286 = 0.00942
+B = 0.4/(60+6) + 0.2/(60+1) = 0.00606 + 0.00328 = 0.00934
+
+结果: A 略高于 B（向量召回的排名优势被体现）
+```
+
+---
+
+### 亮点5: 三层记忆系统
 
 **面试问法：** "对话系统如何记住上下文？多轮对话的偏好如何累积？"
 
@@ -429,7 +742,323 @@ RAG的核心是"检索增强"，不让LLM凭空生成。用户问题先向量化
 
 ---
 
-### 亮点4: 对话满意度多维度衡量
+### 亮点6: 向量召回后回表 MySQL 的设计
+
+**面试问法：** "为什么向量召回后还要回表 MySQL？不直接用向量库的数据？"
+
+**核心问题：向量库是快照数据，存在延迟**
+
+```
+时间线:
+T0: 商品 A 上架，价格 999 元，库存 100
+T1: 商品 A 向量化存入 Milvus
+T2: 运营调整价格为 899 元，库存改为 50（MySQL 已更新）
+T3: 用户发起搜索，Milvus 返回商品 A
+    ↓
+    问题：Milvus 中商品 A 的价格仍是 999，库存仍是 100
+    解决：回表 MySQL 获取最新数据
+```
+
+**代码实现：**
+
+```java
+// RecommendEngineServiceImpl.java
+
+public List<Product> vectorRecall(String query, UserProfile profile, int numItems) {
+    // 1. 向量检索，获取商品 ID 列表（按相似度排序）
+    List<Document> docs = vectorStoreService.searchSimilarProducts(query, numItems);
+    List<String> productIds = docs.stream()
+        .map(doc -> doc.getMetadata().get("productId").toString())
+        .collect(Collectors.toList());
+    
+    // 2. 回表 MySQL 获取最新数据
+    List<Product> products = productService.listByProductIds(productIds);
+    
+    // 3. 关键：重新按向量相似度顺序排列
+    // 因为 MySQL IN 查询返回顺序不保证与输入 ID 顺序一致
+    List<Product> reorderProductList = reorderByIds(products, productIds);
+    
+    return reorderProductList;
+}
+
+private List<Product> reorderByIds(List<Product> products, List<String> orderedIds) {
+    Map<String, Product> map = products.stream()
+        .collect(Collectors.toMap(Product::getProductId, p -> p, (a, b) -> a));
+    
+    List<Product> ordered = new ArrayList<>();
+    for (String id : orderedIds) {  // 按向量相似度顺序遍历
+        Product p = map.get(id);
+        if (p != null) {
+            ordered.add(p);
+        }
+    }
+    return ordered;
+}
+```
+
+**为什么需要 reorderByIds？**
+
+```
+Milvus 返回: [P1, P3, P5, P7]（按相似度降序）
+MySQL IN 查询: SELECT * FROM product WHERE product_id IN ('P1', 'P3', 'P5', 'P7')
+MySQL 返回: [P5, P1, P7, P3]（顺序不稳定！）
+
+如果不重排，相似度排序会被破坏。
+```
+
+---
+
+## 七、面试高频追问（A2A 进阶篇）
+
+### Q16: Agent 之间可以直接通信吗？
+
+**问法：** "UserProfileAgent 能不能直接调用 ProductRecAgent？"
+
+**回答：**
+
+当前架构是 **Supervisor 编排模式**，Agent 之间不直接通信，而是通过 Supervisor 作为中介：
+
+```
+❌ 不支持: UserProfileAgent → ProductRecAgent
+✅ 支持:   UserProfileAgent → Supervisor → ProductRecAgent
+```
+
+**原因：**
+1. **解耦**：Agent 只关注自己的职责，不知道其他 Agent 的存在
+2. **可测试**：每个 Agent 可独立单元测试
+3. **可扩展**：新增 Agent 不影响现有 Agent
+
+**如果需要 Agent 之间直接通信怎么办？**
+
+可以引入 **Blackboard 模式**（黑板模式）：
+
+```java
+// 共享黑板
+public class AgentBlackboard {
+    private Map<String, Object> sharedData = new ConcurrentHashMap<>();
+    
+    public void put(String key, Object value) {
+        sharedData.put(key, value);
+    }
+    
+    public Object get(String key) {
+        return sharedData.get(key);
+    }
+}
+
+// Agent 写入黑板
+public class UserProfileAgent extends BaseAgent {
+    protected AgentResult execute(Map<String, Object> params) {
+        UserProfile profile = analyzeUser(params);
+        AgentBlackboard.put("user_profile", profile);  // 写入黑板
+        return AgentResult.builder().success(true).build();
+    }
+}
+
+// Agent 读取黑板
+public class ProductRecAgent extends BaseAgent {
+    protected AgentResult execute(Map<String, Object> params) {
+        UserProfile profile = (UserProfile) AgentBlackboard.get("user_profile");  // 读取黑板
+        // ...
+    }
+}
+```
+
+**当前项目没有使用黑板模式的原因：**
+- Supervisor 已经做了数据聚合，功能等价
+- 黑板模式引入共享状态，需要处理并发问题
+
+---
+
+### Q17: 如何保证 Agent 执行的顺序？
+
+**问法：** "Phase 1 和 Phase 2 的顺序是怎么保证的？"
+
+**回答：**
+
+通过 `CompletableFuture.join()` 的阻塞特性保证顺序：
+
+```java
+// Phase 1: 并行启动，但必须全部完成才能进入 Phase 2
+CompletableFuture<AgentResult> profileFuture = userProfileAgent.runAsync(...);
+CompletableFuture<AgentResult> recFuture = productRecAgent.runAsync(...);
+
+// join() 会阻塞直到 Future 完成
+AgentResult profileResult = profileFuture.join();  // 阻塞点 1
+AgentResult recResult = recFuture.join();          // 阻塞点 2
+
+// Phase 2: 只有 Phase 1 的两个 Future 都 join() 完成后才会执行
+CompletableFuture<AgentResult> rerankFuture = productRecAgent.runAsync(...);
+CompletableFuture<AgentResult> inventoryFuture = inventoryAgent.runAsync(...);
+
+AgentResult rerankResult = rerankFuture.join();    // 阻塞点 3
+AgentResult inventoryResult = inventoryFuture.join(); // 阻塞点 4
+```
+
+**执行时序图：**
+
+```
+时间线 →
+───────────────────────────────────────────────────────────────
+Phase 1:
+    UserProfileAgent   ████████████████
+    ProductRecAgent    ████████████████████████████
+                       ↑              ↑
+                    join()         join()
+───────────────────────────────────────────────────────────────
+Phase 2: (Phase 1 全部完成后才开始)
+    ProductRecAgent(rerank)  ████████████████
+    InventoryAgent           ██████████████
+                            ↑            ↑
+                         join()       join()
+───────────────────────────────────────────────────────────────
+Phase 3: (Phase 2 全部完成后才开始)
+    MarketingCopyAgent      ████████████████
+                          ↑
+                       join()
+```
+
+---
+
+### Q18: Agent 的超时如何处理？
+
+**问法：** "如果某个 Agent 执行超过 10 秒怎么办？"
+
+**回答：**
+
+BaseAgent 构造函数中指定超时时间：
+
+```java
+public class UserProfileAgent extends BaseAgent {
+    public UserProfileAgent() {
+        super("user_profile", 5.0, 2);  // 超时 5 秒，最大重试 2 次
+    }
+}
+```
+
+**超时处理策略：**
+
+```java
+// 在 Supervisor 中使用 orTimeout
+CompletableFuture<AgentResult> profileFuture = userProfileAgent.runAsync(params)
+    .orTimeout(5, TimeUnit.SECONDS)
+    .exceptionally(ex -> {
+        log.error("UserProfileAgent 超时", ex);
+        return AgentResult.builder()
+            .agentName("user_profile")
+            .success(false)
+            .error("timeout")
+            .build();
+    });
+```
+
+**各 Agent 的超时配置：**
+
+| Agent | 超时时间 | 原因 |
+|-------|----------|------|
+| UserProfileAgent | 5s | LLM 分析用户行为，较快 |
+| ProductRecAgent | 8s | 多路召回 + LLM 重排，较慢 |
+| InventoryAgent | 5s | 纯数据库查询，较快 |
+| MarketingCopyAgent | 10s | LLM 生成文案，最慢 |
+
+---
+
+### Q19: 如何监控 Agent 的执行情况？
+
+**问法：** "生产环境怎么知道哪个 Agent 出问题了？"
+
+**回答：**
+
+1. **AgentResult 内置监控字段：**
+
+```java
+AgentResult result = AgentResult.builder()
+    .agentName("user_profile")
+    .success(true)
+    .latencyMs(1234.5)   // 执行耗时
+    .confidence(0.85)    // 结果置信度
+    .build();
+```
+
+2. **BaseAgent 内置错误率统计：**
+
+```java
+public abstract class BaseAgent {
+    private final AtomicInteger callCount = new AtomicInteger(0);
+    private final AtomicInteger errorCount = new AtomicInteger(0);
+    
+    public double getErrorRate() {
+        int calls = callCount.get();
+        return calls == 0 ? 0.0 : (double) errorCount.get() / calls;
+    }
+}
+```
+
+3. **日志埋点：**
+
+```java
+log.info("SupervisorOrchestrator.recommend Phase1完成 画像={} 召回{}条商品", 
+    profile != null ? profile.getSegments() : "null", 
+    rawProducts.size());
+
+log.info("SupervisorOrchestrator.recommend complete request={} latency={:.1f}ms products={}", 
+    requestId, totalLatency, finalProducts.size());
+```
+
+4. **推荐：接入 Prometheus + Grafana 监控：**
+
+```java
+// 使用 Micrometer 记录指标
+@Timed(value = "agent.execute", description = "Agent execution time", extraTags = {"agent", "user_profile"})
+public AgentResult execute(Map<String, Object> params) {
+    // ...
+}
+
+// 记录自定义指标
+meterRegistry.counter("agent.error", "agent", "user_profile").increment();
+```
+
+---
+
+### Q20: 这个架构的瓶颈在哪里？如何扩展？
+
+**问法：** "如果用户量增长 10 倍，系统怎么扩展？"
+
+**回答：**
+
+**当前架构的瓶颈：**
+
+1. **单机并行**：CompletableFuture 只能在单机内并行，无法跨机器
+2. **内存限制**：所有 Agent 运行在同一个 JVM，内存共享
+3. **数据库连接池**：高并发时连接池可能成为瓶颈
+
+**扩展方案：**
+
+| 瓶颈 | 扩展方案 | 代价 |
+|------|----------|------|
+| 单机并行 | 将 Agent 拆分为微服务，用 gRPC 通信 | 增加网络延迟 |
+| 内存限制 | 使用 Redis 存储中间结果 | 序列化开销 |
+| 数据库连接池 | 读写分离 + 连接池扩容 | 架构复杂度 |
+
+**推荐扩展路径：**
+
+```
+阶段1（当前）: 单机 CompletableFuture
+    ↓ QPS > 1000
+阶段2: Agent 微服务化 + gRPC
+    ↓ QPS > 10000
+阶段3: 引入消息队列异步处理
+    ↓ QPS > 100000
+阶段4: 存量计算 + 增量更新
+```
+
+**关键：不要过早优化。当前架构在 QPS < 1000 时完全够用。**
+
+---
+
+## 八、面试高频追问（记忆与满意度篇）
+
+### Q21: 对话满意度多维度衡量
 
 **面试问法：** "如何衡量对话系统的用户满意度？追问次数能代表不满意吗？"
 
