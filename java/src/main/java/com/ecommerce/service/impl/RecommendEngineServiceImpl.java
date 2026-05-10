@@ -14,6 +14,7 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.document.Document;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
@@ -809,7 +810,8 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
                 "你是电商推荐专家。根据用户画像为用户选出最匹配的%d个商品。\n" +
                         "用户画像: 偏好类目=%s, 价格范围=%.0f-%.0f, 分群=%s\n" +
                         "候选商品(按规则预排序):\n%s\n" +
-                        "请输出商品ID数组（JSON格式），只输出ID数组，不要解释。",
+                        "\n输出JSON格式示例：\n[\"P001\",\"P003\",\"P002\"]\n" +
+                        "请严格按照以上JSON格式输出商品ID列表。",
                 numItems,
                 profile.getPreferredCategories(),
                 profile.getPriceRangeMin() != null ? profile.getPriceRangeMin().doubleValue() : 0,
@@ -817,60 +819,23 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
                 profile.getSegments(),
                 productList
         );
-        String response = chatClient.prompt().user(prompt).call().content();
-        String cleaned = response.trim();
-        if (cleaned.startsWith("```")) {
-            cleaned = cleaned.substring(cleaned.indexOf('\n') + 1);
-            cleaned = cleaned.substring(0, cleaned.lastIndexOf("```"));
+        List<String> rankedIds = chatClient.prompt()
+                                    .user(prompt)
+                                    .call()
+                                    .entity(new ParameterizedTypeReference<List<String>>() {});
+        if (rankedIds == null) {
+            rankedIds = Collections.emptyList();
         }
-        List<String> rankedIds = parseIdList(cleaned);
         Map<String, Product> idMap = candidates.stream()
                 .collect(Collectors.toMap(Product::getProductId, p -> p, (a, b) -> a));
-        List<Product> result = new ArrayList<>();
+        List<Product> resultList = new ArrayList<>();
         for (String id : rankedIds) {
             Product p = idMap.get(id);
-            if (p != null) {
-                result.add(p);
+            if (Objects.nonNull(p)) {
+                resultList.add(p);
             }
         }
-        for (Product p : candidates) {
-            if (result.size() >= numItems) {
-                break;
-            }
-            if (!rankedIds.contains(p.getProductId())) {
-                result.add(p);
-            }
-        }
-        return result;
-    }
-
-    /**
-     * 解析LLM返回的商品ID列表（支持JSON数组和逐行文本）。
-     */
-    private List<String> parseIdList(String raw) {
-        List<String> result = new ArrayList<>();
-        try {
-            String trimmed = raw.trim();
-            if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-                String content = trimmed.substring(1, trimmed.length() - 1);
-                for (String part : content.split(",")) {
-                    String id = part.trim().replace("\"", "").replace("'", "");
-                    if (!id.isEmpty()) {
-                        result.add(id);
-                    }
-                }
-            } else {
-                for (String line : trimmed.split("\n")) {
-                    String id = line.trim().replace("\"", "").replace("'", "").replace(",", "");
-                    if (!id.isEmpty()) {
-                        result.add(id);
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.warn("RecommendEngineServiceImpl.parseIdList 解析ID列表失败: {}", e.getMessage());
-        }
-        return result;
+        return resultList;
     }
 
     /**
