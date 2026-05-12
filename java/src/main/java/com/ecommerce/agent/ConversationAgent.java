@@ -120,7 +120,15 @@ public class ConversationAgent extends BaseAgent {
         // 步骤5: 提取回复内容
         String reply = extractReply(subResult);
 
-        // 步骤6: 更新短期记忆（保存对话历史）
+        // 步骤6: 合并entities（子Agent可能返回增强的entities，如推荐商品列表）
+        Map<String, Object> finalEntities = entities;
+        if (subResult.getData() != null && subResult.getData().get("entities") instanceof Map) {
+            Map<String, Object> subEntities = (Map<String, Object>) subResult.getData().get("entities");
+            finalEntities = new HashMap<>(entities != null ? entities : new HashMap<>());
+            finalEntities.putAll(subEntities);
+        }
+
+        // 步骤7: 更新短期记忆（保存对话历史和entities）
         history.add("用户: " + message);
         history.add("助手: " + reply);
         if (history.size() > 20) {
@@ -128,7 +136,7 @@ public class ConversationAgent extends BaseAgent {
         }
         memoryService.saveHistory(
                 conversationSessionService.getBySessionId(sessionId),
-                history, entities);
+                history, finalEntities);
 
         // 步骤7: 记录用户行为
         recordBehavior(userId, message);
@@ -140,6 +148,7 @@ public class ConversationAgent extends BaseAgent {
         resultData.put("intent", intent);
         resultData.put("dialogueHistory", history);
         resultData.put("summary", summary);
+        resultData.put("entities", finalEntities);
 
         log.info("ConversationAgent.execute - 处理完成, userId: {}, intent: {}, subAgent: {}", userId, intent, subAgent.name);
         return AgentResult.builder()
@@ -161,9 +170,25 @@ public class ConversationAgent extends BaseAgent {
                         "- recommend: 用户想要推荐商品（如\"推荐手机\"\"适合学生的笔记本\"）\n" +
                         "- product_query: 用户询问某款商品（如\"iPhone 16 多少钱\"\"华为 Mate 70 怎么样\"）\n" +
                         "- knowledge_query: 用户问售后/物流/优惠活动等知识性问题\n" +
-                        "- compare: 用户对比商品（如\"iPhone 和 华为哪个好\"\"对比这两款笔记本\"）\n" +
+                        "- compare: 用户对比商品（如\"iPhone 和 华为哪个好\"\"对比这两款笔记本\"\"比较一下刚才推荐的\"\"比较第1个和第2个\"）\n" +
                         "- chitchat: 闲聊\n" +
-                        "实体可包含：category(类目), brand(品牌), price_min, price_max, product_name(商品名), product_names(商品名数组), num_items\n" +
+                        "\n" +
+                        "实体说明：\n" +
+                        "- category: 类目（如\"手机\"）\n" +
+                        "- brand: 品牌（如\"华为\"）\n" +
+                        "- price_min, price_max: 价格区间\n" +
+                        "- product_name: 单个商品名\n" +
+                        "- product_names: 商品名数组（如[\"iPhone 16\", \"华为 Mate 70\"]）\n" +
+                        "- product_ids: 商品ID数组（如果用户明确指定了商品ID）\n" +
+                        "- indices: 序号数组（当用户说\"比较第1个和第2个\"时，提取序号，如[1, 2]）\n" +
+                        "- all: 布尔值（当用户说\"比较这几个\"\"对比刚才推荐的\"等指代性语句时，设为true）\n" +
+                        "- num_items: 推荐数量\n" +
+                        "\n" +
+                        "注意：\n" +
+                        "1. 当用户说\"比较第1个和第2个\"\"对比第2个和第3个\"时，提取indices，如[1, 2]或[2, 3]\n" +
+                        "2. 当用户说\"比较这几个\"\"对比刚才推荐的\"等指代性语句时，设置all=true\n" +
+                        "3. 当用户直接说商品名时，提取到product_names中\n" +
+                        "\n" +
                         "%s用户消息：%s",
                 historyContext, message
         );

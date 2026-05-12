@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react'
 import { Input, Button, Avatar, Spin, Tag, Card, message } from 'antd'
 import { MessageOutlined, CloseOutlined, SendOutlined, RobotOutlined, UserOutlined, ShoppingOutlined, LikeOutlined, LikeFilled, DislikeOutlined, DislikeFilled } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import api from '../services/api'
 
 const SUGGESTED_QUESTIONS = [
@@ -171,7 +173,15 @@ function ChatWidget() {
                     padding: '8px 12px', borderRadius: 10,
                     fontSize: 13, lineHeight: 1.6, wordBreak: 'break-word'
                   }}>
-                    {msg.content}
+                    {msg.type === 'bot' ? (
+                      <div className="markdown-content">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {msg.content}
+                        </ReactMarkdown>
+                      </div>
+                    ) : (
+                      msg.content
+                    )}
                   </div>
                   
                   {/* 反馈按钮 - 仅对AI回复显示 */}

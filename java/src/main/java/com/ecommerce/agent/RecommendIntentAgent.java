@@ -59,12 +59,19 @@ public class RecommendIntentAgent extends BaseAgent {
         // 步骤5: 生成推荐回复
         String reply = generateRecommendReply(products);
 
-        // 步骤6: 组装返回结果
+        // 步骤6: 将推荐商品ID保存到entities中，供后续对比使用
         Map<String, Object> data = new HashMap<>();
         data.put("reply", reply);
         data.put("products", products);
+        
+        // 步骤7: 保存推荐商品ID到entities（关键：供后续对比使用）
+        Map<String, Object> enrichedEntities = new HashMap<>(entities != null ? entities : new HashMap<>());
+        enrichedEntities.put("recommended_product_ids", products.stream()
+                .map(Product::getProductId)
+                .collect(java.util.stream.Collectors.toList()));
+        data.put("entities", enrichedEntities);
 
-        log.info("RecommendIntentAgent.execute - 推荐完成, userId: {}, 商品数: {}", userId, products.size());
+        log.info("RecommendIntentAgent.execute - 推荐完成, userId: {}, 商品数: {}, 已保存ID到entities", userId, products.size());
         return AgentResult.builder().agentName(name).success(true).data(data).confidence(0.9).build();
     }
 
@@ -74,7 +81,7 @@ public class RecommendIntentAgent extends BaseAgent {
             return "抱歉，暂时没有合适的商品推荐给您。您可以告诉我更具体的需求，比如预算、品牌偏好等。";
         }
 
-        // 步骤2: 拼接推荐列表文本
+        // 步骤2: 拼接推荐列表文本（包含商品ID以便后续对比时识别）
         StringBuilder sb = new StringBuilder("根据您的需求，我为您精选了以下商品：\n\n");
         for (int i = 0; i < products.size(); i++) {
             Product p = products.get(i);
@@ -83,7 +90,8 @@ public class RecommendIntentAgent extends BaseAgent {
                     p.getPrice() != null ? p.getPrice().doubleValue() : 0,
                     p.getCategoryName()));
         }
-        sb.append("\n如果您想了解某款商品的详细信息，直接问我就可以啦！");
+        sb.append("\n如果您想了解某款商品的详细信息，直接问我就可以啦！\n");
+        sb.append("您也可以说\"比较第1个和第2个\"或\"对比这几款手机\"来对比商品。");
         return sb.toString();
     }
 }
