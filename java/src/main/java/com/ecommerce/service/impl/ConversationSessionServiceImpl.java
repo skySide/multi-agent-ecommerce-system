@@ -46,6 +46,7 @@ public class ConversationSessionServiceImpl extends ServiceImpl<ConversationSess
                 .dialogueHistory("[]")
                 .summary("")
                 .extractedInfo("{}")
+                .roundIntents("[]")
                 .build();
         save(session);
         return session;

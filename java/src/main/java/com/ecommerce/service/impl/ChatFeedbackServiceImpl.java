@@ -1,6 +1,7 @@
 package com.ecommerce.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.ecommerce.dto.FeedbackRequestDTO;
 import com.ecommerce.entity.ChatFeedback;
 import com.ecommerce.mapper.ChatFeedbackMapper;
 import com.ecommerce.service.ChatFeedbackService;
@@ -26,49 +27,54 @@ public class ChatFeedbackServiceImpl extends ServiceImpl<ChatFeedbackMapper, Cha
     private ChatFeedbackMapper chatFeedbackMapper;
 
     @Override
-    public boolean submitFeedback(String userId, String sessionId, Integer messageIndex,
-                                   String userMessage, String aiMessage, Integer rating) {
-        log.info("ChatFeedbackServiceImpl.submitFeedback 用户={} 会话={} 索引={} 评分={}",
-                userId, sessionId, messageIndex, rating);
+    public boolean submitFeedback(FeedbackRequestDTO dto) {
+        log.info("ChatFeedbackService.submitFeedback 用户={} 会话={} 索引={} 评分={} 原因={}",
+                dto.getUserId(), dto.getSessionId(), dto.getMessageIndex(), dto.getRating(), dto.getFeedbackReason());
 
-        if (StringUtils.isBlank(userId) || StringUtils.isBlank(sessionId) || rating == null) {
-            log.error("ChatFeedbackServiceImpl.submitFeedback 参数不完整");
+        // 步骤1: 参数校验
+        if (StringUtils.isBlank(dto.getUserId()) || StringUtils.isBlank(dto.getSessionId()) || dto.getRating() == null) {
+            log.error("ChatFeedbackService.submitFeedback - 参数不完整");
             return false;
         }
 
-        if (rating != 1 && rating != -1) {
-            log.error("ChatFeedbackServiceImpl.submitFeedback 评分值无效: {}", rating);
+        // 步骤2: 校验评分值
+        if (dto.getRating() != 1 && dto.getRating() != -1) {
+            log.error("ChatFeedbackService.submitFeedback - 评分值无效: {}", dto.getRating());
             return false;
         }
 
         try {
-            // 查找是否已有反馈记录
+            // 步骤3: 查找是否已有反馈记录
             ChatFeedback existing = lambdaQuery()
-                    .eq(ChatFeedback::getUserId, userId)
-                    .eq(ChatFeedback::getSessionId, sessionId)
-                    .eq(ChatFeedback::getMessageIndex, messageIndex)
+                    .eq(ChatFeedback::getUserId, dto.getUserId())
+                    .eq(ChatFeedback::getSessionId, dto.getSessionId())
+                    .eq(ChatFeedback::getMessageIndex, dto.getMessageIndex())
                     .one();
 
             if (existing != null) {
-                // 更新现有记录
-                existing.setRating(rating);
+                // 步骤4: 更新现有记录
+                existing.setRating(dto.getRating());
+                existing.setFeedbackReason(dto.getFeedbackReason());
+                existing.setFeedbackComment(dto.getFeedbackComment());
                 existing.setFeedbackTime(LocalDateTime.now());
                 return updateById(existing);
             } else {
-                // 创建新记录
+                // 步骤5: 创建新记录
                 ChatFeedback feedback = ChatFeedback.builder()
-                        .userId(userId)
-                        .sessionId(sessionId)
-                        .messageIndex(messageIndex != null ? messageIndex : 0)
-                        .userMessage(userMessage)
-                        .aiMessage(aiMessage)
-                        .rating(rating)
+                        .userId(dto.getUserId())
+                        .sessionId(dto.getSessionId())
+                        .messageIndex(dto.getMessageIndex() != null ? dto.getMessageIndex() : 0)
+                        .userMessage(dto.getUserMessage())
+                        .aiMessage(dto.getAiMessage())
+                        .rating(dto.getRating())
+                        .feedbackReason(dto.getFeedbackReason())
+                        .feedbackComment(dto.getFeedbackComment())
                         .feedbackTime(LocalDateTime.now())
                         .build();
                 return save(feedback);
             }
         } catch (Exception e) {
-            log.error("ChatFeedbackServiceImpl.submitFeedback 提交反馈失败", e);
+            log.error("ChatFeedbackService.submitFeedback - 提交反馈失败", e);
             return false;
         }
     }
@@ -106,7 +112,7 @@ public class ChatFeedbackServiceImpl extends ServiceImpl<ChatFeedbackMapper, Cha
                     .count(thumbsDown)
                     .build());
 
-            log.info("ChatFeedbackServiceImpl.getSatisfactionStats 点赞={} 点踩={} 满意度={}",
+            log.info("ChatFeedbackService.getSatisfactionStats 点赞={} 点踩={} 满意度={}",
                     thumbsUp, thumbsDown, satisfactionRate);
 
             return SatisfactionStatsVO.builder()
@@ -117,7 +123,7 @@ public class ChatFeedbackServiceImpl extends ServiceImpl<ChatFeedbackMapper, Cha
                     .ratingDistribution(distribution)
                     .build();
         } catch (Exception e) {
-            log.error("ChatFeedbackServiceImpl.getSatisfactionStats 统计失败", e);
+            log.error("ChatFeedbackService.getSatisfactionStats 统计失败", e);
             return SatisfactionStatsVO.builder()
                     .totalFeedback(0L)
                     .likeCount(0L)
@@ -169,7 +175,7 @@ public class ChatFeedbackServiceImpl extends ServiceImpl<ChatFeedbackMapper, Cha
                     .ratingDistribution(distribution)
                     .build();
         } catch (Exception e) {
-            log.error("ChatFeedbackServiceImpl.getUserFeedbackStats 统计失败 userId={}", userId, e);
+            log.error("ChatFeedbackService.getUserFeedbackStats 统计失败 userId={}", userId, e);
             return SatisfactionStatsVO.builder()
                     .totalFeedback(0L)
                     .likeCount(0L)

@@ -1,10 +1,12 @@
 package com.ecommerce.service.impl;
 
+import com.ecommerce.common.constants.QualityConstants;
 import com.ecommerce.entity.ConversationSession;
 import com.ecommerce.entity.UserProfile;
 import com.ecommerce.service.ConversationSessionService;
 import com.ecommerce.service.MemoryService;
 import com.ecommerce.service.UserProfileService;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -148,6 +150,43 @@ public class MemoryServiceImpl implements MemoryService {
         profile.setPriceRangeMax(priceMax);
 
         return profile;
+    }
+
+    @Override
+    public void updateRoundIntents(ConversationSession session, int round, String intent, Map<String, Object> entities) {
+        // 步骤1: 解析现有的 round_intents
+        List<Map<String, Object>> roundIntents = new ArrayList<>();
+        String existingJson = session.getRoundIntents();
+        if (existingJson != null && !existingJson.isEmpty() && !existingJson.equals("[]")) {
+            try {
+                roundIntents = objectMapper.readValue(existingJson, new TypeReference<List<Map<String, Object>>>() {});
+            } catch (Exception e) {
+                log.warn("MemoryService.updateRoundIntents - 解析 round_intents 失败", e);
+            }
+        }
+
+        // 步骤2: 构建当前轮数据
+        Map<String, Object> roundData = new LinkedHashMap<>();
+        roundData.put("round", round);
+        roundData.put("intent", intent);
+        roundData.put("entities", entities != null ? entities : new HashMap<>());
+        roundIntents.add(roundData);
+
+        // 步骤3: 只保留最近 N 轮
+        if (roundIntents.size() > QualityConstants.ROUND_INTENTS_MAX_SIZE) {
+            roundIntents = roundIntents.subList(
+                    roundIntents.size() - QualityConstants.ROUND_INTENTS_MAX_SIZE,
+                    roundIntents.size());
+        }
+
+        // 步骤4: 序列化并保存
+        try {
+            session.setRoundIntents(objectMapper.writeValueAsString(roundIntents));
+            session.setUpdateTime(LocalDateTime.now());
+            conversationSessionService.updateById(session);
+        } catch (Exception e) {
+            log.error("MemoryService.updateRoundIntents - 保存 round_intents 失败, sessionId: {}", session.getSessionId(), e);
+        }
     }
 
     @SuppressWarnings("unchecked")

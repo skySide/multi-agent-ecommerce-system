@@ -6,8 +6,10 @@ import com.ecommerce.dto.ConversationRequestDTO;
 import com.ecommerce.model.ConversationRequest;
 import com.ecommerce.model.ConversationResponse;
 import com.ecommerce.service.ConversationService;
+import com.ecommerce.service.SessionQualityMetricsService;
 import com.ecommerce.vo.SessionCreateVO;
 import com.ecommerce.vo.SessionEndVO;
+import com.ecommerce.vo.SessionSummaryVO;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
@@ -30,6 +32,8 @@ public class ConversationController {
 
     @Resource
     private ConversationService conversationService;
+    @Resource
+    private SessionQualityMetricsService sessionQualityMetricsService;
     @Resource
     private ObjectMapper objectMapper;
 
@@ -83,6 +87,16 @@ public class ConversationController {
     }
 
     /**
+     * 获取用户的历史会话列表
+     */
+    @GetMapping("/sessions")
+    public Result<List<SessionSummaryVO>> listSessions(@RequestParam @NotBlank String userId) {
+        log.info("ConversationController.listSessions, 用户: {}", userId);
+        List<SessionSummaryVO> sessions = conversationService.listUserSessions(userId);
+        return Result.success(sessions);
+    }
+
+    /**
      * 获取会话历史
      */
     @GetMapping("/session/{sessionId}/history")
@@ -107,5 +121,39 @@ public class ConversationController {
                     .build());
         }
         return Result.error(ErrorCode.CONVERSATION_ERROR, "结束会话失败");
+    }
+
+    /**
+     * 取消正在生成的会话
+     */
+    @PostMapping("/{sessionId}/cancel")
+    public Result<SessionEndVO> cancelGeneration(@PathVariable String sessionId) {
+        log.info("ConversationController.cancelGeneration, 会话: {}", sessionId);
+        boolean success = conversationService.cancelGeneration(sessionId);
+        log.info("ConversationController.cancelGeneration, 结果: {}", success);
+        return Result.success(SessionEndVO.builder()
+                .sessionId(sessionId)
+                .success(success)
+                .build());
+    }
+
+    /**
+     * 上报会话突然结束
+     */
+    @PostMapping("/{sessionId}/abandon")
+    public Result<SessionEndVO> abandonSession(@PathVariable String sessionId,
+                                                @RequestParam(required = false) String userId) {
+        log.info("ConversationController.abandonSession, 会话: {}, 用户: {}", sessionId, userId);
+        // 步骤1: 结束会话
+        conversationService.endSession(sessionId);
+        // 步骤2: 记录质量事件
+        if (userId != null && !userId.isEmpty()) {
+            sessionQualityMetricsService.recordAbruptEnd(sessionId, userId,
+                    "{\"source\":\"frontend_unmount\"}");
+        }
+        return Result.success(SessionEndVO.builder()
+                .sessionId(sessionId)
+                .success(true)
+                .build());
     }
 }

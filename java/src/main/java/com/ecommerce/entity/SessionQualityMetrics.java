@@ -6,17 +6,21 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
- * 对话会话实体类
+ * 会话质量指标实体类
+ * 记录会话过程中的质量事件：重复提问、突然结束、转人工等
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@TableName("conversation_session")
-public class ConversationSession {
+@TableName("session_quality_metrics")
+public class SessionQualityMetrics implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     @TableId(type = IdType.AUTO)
     private Long id;
@@ -27,20 +31,11 @@ public class ConversationSession {
     /** 用户ID */
     private String userId;
 
-    /** 对话历史JSON */
-    private String dialogueHistory;
+    /** 指标类型: repeated_question/abrupt_end/transfer_to_human/low_engagement */
+    private String metricType;
 
-    /** 对话摘要（LLM生成） */
-    private String summary;
-
-    /** 提取的信息JSON */
-    private String extractedInfo;
-
-    /** 状态: 0-结束, 1-进行中 */
-    private Integer status;
-
-    /** 每轮意图+实体JSON数组，最近10轮 */
-    private String roundIntents;
+    /** 指标详情JSON */
+    private String metricValue;
 
     @TableLogic
     @TableField(fill = FieldFill.INSERT)

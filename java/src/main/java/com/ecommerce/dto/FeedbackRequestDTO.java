@@ -35,4 +35,10 @@ public class FeedbackRequestDTO implements Serializable {
 
     /** 评分: 1-赞, -1-踩 */
     private Integer rating;
+
+    /** 反馈原因标签，多选用逗号分隔 */
+    private String feedbackReason;
+
+    /** 用户自由填写的反馈内容 */
+    private String feedbackComment;
 }

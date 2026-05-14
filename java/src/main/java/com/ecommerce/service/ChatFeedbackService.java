@@ -1,6 +1,7 @@
 package com.ecommerce.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.ecommerce.dto.FeedbackRequestDTO;
 import com.ecommerce.entity.ChatFeedback;
 import com.ecommerce.vo.SatisfactionStatsVO;
 
@@ -12,16 +13,10 @@ public interface ChatFeedbackService extends IService<ChatFeedback> {
     /**
      * 提交反馈
      *
-     * @param userId       用户ID
-     * @param sessionId    会话ID
-     * @param messageIndex 消息索引
-     * @param userMessage  用户消息
-     * @param aiMessage    AI回复
-     * @param rating       评分 (1:赞, -1:踩)
+     * @param dto 反馈请求DTO
      * @return 是否成功
      */
-    boolean submitFeedback(String userId, String sessionId, Integer messageIndex,
-                           String userMessage, String aiMessage, Integer rating);
+    boolean submitFeedback(FeedbackRequestDTO dto);
 
     /**
      * 获取满意度统计

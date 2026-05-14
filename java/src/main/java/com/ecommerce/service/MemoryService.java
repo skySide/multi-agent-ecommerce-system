@@ -25,4 +25,15 @@ public interface MemoryService {
     String buildLongTermContext(String userId);
 
     UserProfile buildProfileFromEntities(String userId, Map<String, Object> entities);
+
+    /**
+     * 更新每轮意图记录
+     * 追加当前轮的 intent + entities 到 round_intents，保留最近10轮
+     *
+     * @param session  会话实体
+     * @param round    当前轮次
+     * @param intent   识别出的意图
+     * @param entities 本轮实体
+     */
+    void updateRoundIntents(ConversationSession session, int round, String intent, Map<String, Object> entities);
 }

@@ -152,8 +152,25 @@ class ApiService {
     return this.request(`${API_BASE_URL}/v1/conversation/session?userId=${userId}`, { method: 'POST' })
   }
 
+  async listSessions(userId) {
+    return this.request(`${API_BASE_URL}/v1/conversation/sessions?userId=${userId}`)
+  }
+
+  async getSessionHistory(sessionId) {
+    return this.request(`${API_BASE_URL}/v1/conversation/session/${sessionId}/history`)
+  }
+
+  async cancelGeneration(sessionId) {
+    return this.request(`${API_BASE_URL}/v1/conversation/${sessionId}/cancel`, { method: 'POST' })
+  }
+
+  async abandonSession(sessionId, userId) {
+    const query = userId ? `?userId=${userId}` : ''
+    return this.request(`${API_BASE_URL}/v1/conversation/${sessionId}/abandon${query}`, { method: 'POST' })
+  }
+
   // ===== AI反馈 =====
-  async submitFeedback(userId, sessionId, messageIndex, userMessage, aiMessage, rating) {
+  async submitFeedback(userId, sessionId, messageIndex, userMessage, aiMessage, rating, feedbackReason, feedbackComment) {
     return this.request(`${API_BASE_URL}/v1/chat/feedback`, {
       method: 'POST',
       body: JSON.stringify({
@@ -162,13 +179,19 @@ class ApiService {
         messageIndex,
         userMessage,
         aiMessage,
-        rating
+        rating,
+        feedbackReason,
+        feedbackComment
       })
     })
   }
 
   async getSatisfactionStats() {
     return this.request(`${API_BASE_URL}/v1/chat/feedback/stats`)
+  }
+
+  async getFeedbackReasons() {
+    return this.request(`${API_BASE_URL}/v1/chat/feedback/reasons`)
   }
 
   // ===== 实验 =====

@@ -197,6 +197,7 @@ CREATE TABLE `conversation_session` (
     `summary` TEXT COMMENT '对话摘要（LLM生成）',
     `extracted_info` TEXT COMMENT '提取的信息JSON',
     `status` TINYINT DEFAULT 1 COMMENT '状态: 0-结束, 1-进行中',
+    `round_intents` TEXT COMMENT '每轮意图+实体JSON数组，最近10轮。[{"round":0,"intent":"recommend","entities":{}}]',
     `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除',
     `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -217,6 +218,8 @@ CREATE TABLE `chat_feedback` (
     `user_message` TEXT COMMENT '用户消息',
     `ai_message` TEXT COMMENT 'AI回复内容',
     `rating` TINYINT DEFAULT 0 COMMENT '评分: 1-赞, -1-踩, 0-未评价',
+    `feedback_reason` VARCHAR(200) DEFAULT '' COMMENT '反馈原因标签，多选用逗号分隔',
+    `feedback_comment` TEXT COMMENT '用户自由填写的反馈内容',
     `feedback_time` DATETIME DEFAULT NULL COMMENT '反馈时间',
     `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除',
     `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -274,6 +277,25 @@ CREATE TABLE `user_favorite` (
     UNIQUE KEY `uk_user_product` (`user_id`, `product_id`),
     INDEX `idx_user_id` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户收藏表';
+
+-- ----------------------------
+-- 会话质量指标表
+-- ----------------------------
+DROP TABLE IF EXISTS `session_quality_metrics`;
+CREATE TABLE `session_quality_metrics` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    `session_id` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '会话ID',
+    `user_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '用户ID',
+    `metric_type` VARCHAR(50) NOT NULL DEFAULT '' COMMENT '指标类型: repeated_question/abrupt_end/transfer_to_human/low_engagement',
+    `metric_value` TEXT COMMENT '指标详情JSON',
+    `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除: 0-否, 1-是',
+    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX `idx_session_id` (`session_id`),
+    INDEX `idx_user_id` (`user_id`),
+    INDEX `idx_metric_type` (`metric_type`),
+    INDEX `idx_create_time` (`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='会话质量指标表';
 
 SET FOREIGN_KEY_CHECKS = 1;
 

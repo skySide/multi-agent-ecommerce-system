@@ -9,11 +9,14 @@ import com.ecommerce.service.ConversationService;
 import com.ecommerce.service.ConversationSessionService;
 import com.ecommerce.service.MemoryService;
 import com.ecommerce.agent.ConversationAgent;
+import com.ecommerce.vo.SessionSummaryVO;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.concurrent.CancellationException;
+import java.util.stream.Collectors;
 
 /**
  * 对话服务实现
@@ -39,7 +42,7 @@ public class ConversationServiceImpl implements ConversationService {
         String sessionId = request.getSessionId();
         String message = request.getMessage();
 
-        log.info("ConversationServiceImpl.chat - 用户={}, 会话={}, 消息={}", userId, sessionId, message);
+        log.info("ConversationService.chat - 用户={}, 会话={}, 消息={}", userId, sessionId, message);
 
         // 步骤2: 获取或创建会话（确保sessionId不为空）
         if (sessionId == null || sessionId.isEmpty()) {
@@ -47,11 +50,11 @@ public class ConversationServiceImpl implements ConversationService {
         }
         ConversationSession session = conversationSessionService.getBySessionId(sessionId);
         if (session == null) {
-            log.warn("ConversationServiceImpl.chat - 会话不存在, sessionId={}, 重新创建", sessionId);
+            log.warn("ConversationService.chat - 会话不存在, sessionId={}, 重新创建", sessionId);
             sessionId = createSession(userId);
             session = conversationSessionService.getBySessionId(sessionId);
         } else if (!userId.equals(session.getUserId())) {
-            log.warn("ConversationServiceImpl.chat - 会话归属校验失败, sessionId={} 属于 userId={}, 请求 userId={}",
+            log.warn("ConversationService.chat - 会话归属校验失败, sessionId={} 属于 userId={}, 请求 userId={}",
                     sessionId, session.getUserId(), userId);
             sessionId = createSession(userId);
             session = conversationSessionService.getBySessionId(sessionId);
@@ -69,10 +72,20 @@ public class ConversationServiceImpl implements ConversationService {
         params.put("history", history);
         params.put("summary", summary);
 
-        AgentResult result = conversationAgent.runAsync(params).join();
+        AgentResult result;
+        try {
+            result = conversationAgent.runAndTrack(sessionId, params).join();
+        } catch (CancellationException e) {
+            log.info("ConversationService.chat - 用户取消生成, sessionId: {}", sessionId);
+            return ConversationResponse.builder()
+                    .sessionId(sessionId)
+                    .message("已停止生成")
+                    .timestamp(java.time.Instant.now())
+                    .build();
+        }
 
         if (!result.isSuccess() || result.getData() == null) {
-            log.error("ConversationServiceImpl.chat - 对话处理失败, userId: {}", userId);
+            log.error("ConversationService.chat - 对话处理失败, userId: {}", userId);
             return ConversationResponse.builder()
                     .sessionId(sessionId)
                     .message("抱歉，我暂时无法处理您的请求，请稍后再试。")
@@ -86,7 +99,7 @@ public class ConversationServiceImpl implements ConversationService {
     @Override
     public String createSession(String userId) {
         ConversationSession session = conversationSessionService.createSession(userId);
-        log.info("ConversationServiceImpl.createSession - 创建会话, userId={}, sessionId={}", userId, session.getSessionId());
+        log.info("ConversationService.createSession - 创建会话, userId={}, sessionId={}", userId, session.getSessionId());
         return session.getSessionId();
     }
 
@@ -101,8 +114,46 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Override
     public boolean endSession(String sessionId) {
-        log.info("ConversationServiceImpl.endSession - 结束会话, sessionId={}", sessionId);
+        log.info("ConversationService.endSession - 结束会话, sessionId={}", sessionId);
         return conversationSessionService.endSession(sessionId);
+    }
+
+    @Override
+    public boolean cancelGeneration(String sessionId) {
+        // 步骤1: 委托 ConversationAgent 取消执行
+        log.info("ConversationService.cancelGeneration - 取消生成, sessionId={}", sessionId);
+        return conversationAgent.cancelGeneration(sessionId);
+    }
+
+    @Override
+    public List<SessionSummaryVO> listUserSessions(String userId) {
+        // 步骤1: 参数校验
+        if (userId == null || userId.isEmpty()) {
+            log.warn("ConversationService.listUserSessions - userId为空");
+            return Collections.emptyList();
+        }
+
+        // 步骤2: 查询用户最近20条会话
+        List<ConversationSession> sessions = conversationSessionService.listRecentByUserId(userId, 20);
+
+        // 步骤3: 转换为VO，计算每轮消息数
+        List<SessionSummaryVO> result = sessions.stream().map(session -> {
+            List<String> history = memoryService.deserializeHistory(session.getDialogueHistory());
+            int roundCount = history.size() / 2; // 每轮包含用户+助手两条消息
+
+            return SessionSummaryVO.builder()
+                    .sessionId(session.getSessionId())
+                    .userId(session.getUserId())
+                    .summary(session.getSummary())
+                    .status(session.getStatus())
+                    .roundCount(roundCount)
+                    .createTime(session.getCreateTime())
+                    .updateTime(session.getUpdateTime())
+                    .build();
+        }).collect(Collectors.toList());
+
+        log.info("ConversationService.listUserSessions - 查询成功, userId={}, 会话数={}", userId, result.size());
+        return result;
     }
 
     @SuppressWarnings("unchecked")

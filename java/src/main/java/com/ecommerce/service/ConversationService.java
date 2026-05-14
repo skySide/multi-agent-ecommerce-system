@@ -2,6 +2,7 @@ package com.ecommerce.service;
 
 import com.ecommerce.model.ConversationRequest;
 import com.ecommerce.model.ConversationResponse;
+import com.ecommerce.vo.SessionSummaryVO;
 
 /**
  * 对话服务接口
@@ -28,4 +29,20 @@ public interface ConversationService {
      * 结束会话
      */
     boolean endSession(String sessionId);
+
+    /**
+     * 获取用户的会话列表
+     *
+     * @param userId 用户ID
+     * @return 会话摘要列表
+     */
+    java.util.List<SessionSummaryVO> listUserSessions(String userId);
+
+    /**
+     * 取消正在生成的会话
+     *
+     * @param sessionId 会话ID
+     * @return 是否成功取消
+     */
+    boolean cancelGeneration(String sessionId);
 }

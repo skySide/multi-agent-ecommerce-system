@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react'
-import { Input, Button, Avatar, Spin, Tag, Card, message } from 'antd'
-import { MessageOutlined, CloseOutlined, SendOutlined, RobotOutlined, UserOutlined, ShoppingOutlined, LikeOutlined, LikeFilled, DislikeOutlined, DislikeFilled } from '@ant-design/icons'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
+import { Input, Button, Avatar, Spin, Tag, Card, message, Modal, Checkbox, Drawer, List, Badge } from 'antd'
+import { MessageOutlined, CloseOutlined, SendOutlined, RobotOutlined, UserOutlined, ShoppingOutlined, LikeOutlined, LikeFilled, DislikeOutlined, DislikeFilled, StopOutlined, HistoryOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -13,6 +13,21 @@ const SUGGESTED_QUESTIONS = [
   '退换货政策是什么',
   '优惠券怎么使用',
   '最近有什么促销活动',
+]
+
+const DISLIKE_REASONS = [
+  { label: '回答不准确', value: 'inaccurate' },
+  { label: '答非所问', value: 'irrelevant' },
+  { label: '信息不完整', value: 'incomplete' },
+  { label: '回答太笼统', value: 'too_generic' },
+  { label: '信息过时', value: 'outdated' },
+  { label: '其他', value: 'other' },
+]
+
+const LIKE_REASONS = [
+  { label: '有帮助', value: 'helpful' },
+  { label: '节省了时间', value: 'saved_time' },
+  { label: '其他', value: 'other' },
 ]
 
 function ChatWidget() {
@@ -29,6 +44,17 @@ function ChatWidget() {
   const isLoggedIn = !!userId
   const messagesEndRef = useRef(null)
 
+  // 反馈弹窗状态
+  const [feedbackModalVisible, setFeedbackModalVisible] = useState(false)
+  const [currentFeedbackIndex, setCurrentFeedbackIndex] = useState(null)
+  const [currentRating, setCurrentRating] = useState(0)
+  const [selectedReasons, setSelectedReasons] = useState([])
+  const [feedbackComment, setFeedbackComment] = useState('')
+
+  // 历史会话状态
+  const [sessionListVisible, setSessionListVisible] = useState(false)
+  const [sessions, setSessions] = useState([])
+
   // 未登录：不渲染对话按钮和窗口
   if (!isLoggedIn) return null
   const navigate = useNavigate()
@@ -36,6 +62,15 @@ function ChatWidget() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // 组件卸载时上报会话突然结束
+  useEffect(() => {
+    return () => {
+      if (sessionId && messages.length > 1) {
+        api.abandonSession(sessionId, userId).catch(() => {})
+      }
+    }
+  }, [sessionId, messages.length, userId])
 
   const handleSend = async (text = inputValue) => {
     const userMsg = (text || '').trim()
@@ -74,6 +109,18 @@ function ChatWidget() {
     }
   }
 
+  const handleCancel = async () => {
+    if (!sessionId) {
+      return
+    }
+    try {
+      await api.cancelGeneration(sessionId)
+      message.info('已停止生成')
+    } catch (error) {
+      console.error('取消生成失败:', error)
+    }
+  }
+
   const handleProductClick = (productId) => {
     setVisible(false)
     navigate(`/product/${productId}`)
@@ -86,25 +133,104 @@ function ChatWidget() {
     }
   }
 
-  // 处理反馈
-  const handleFeedback = async (index, rating) => {
+  // 处理反馈 - 打开弹窗
+  const handleFeedback = (index, rating) => {
     const msg = messages[index]
     if (msg.type !== 'bot' || msg.rating !== 0) {
-      return // 已评价过
+      return
+    }
+    setCurrentFeedbackIndex(index)
+    setCurrentRating(rating)
+    setSelectedReasons([])
+    setFeedbackComment('')
+    setFeedbackModalVisible(true)
+  }
+
+  // 提交反馈（含详细原因）
+  const handleSubmitFeedback = async () => {
+    const index = currentFeedbackIndex
+    const rating = currentRating
+    const msg = messages[index]
+    if (!msg || msg.type !== 'bot' || msg.rating !== 0) {
+      setFeedbackModalVisible(false)
+      return
     }
 
+    const reasonStr = selectedReasons.join(',')
+    const comment = feedbackComment.trim() || undefined
+
     try {
-      await api.submitFeedback(userId, sessionId, index, lastUserMessage, msg.content, rating)
-      
-      // 更新本地状态
-      setMessages(prev => prev.map((m, i) => 
+      await api.submitFeedback(userId, sessionId, index, lastUserMessage, msg.content, rating, reasonStr, comment)
+
+      setMessages(prev => prev.map((m, i) =>
         i === index ? { ...m, rating } : m
       ))
-      
+
       message.success(rating === 1 ? '感谢您的认可！' : '感谢您的反馈，我们会持续改进！')
     } catch (error) {
       console.error('反馈提交失败:', error)
       message.error('反馈提交失败')
+    } finally {
+      setFeedbackModalVisible(false)
+    }
+  }
+
+  // 跳过详细反馈（仅保留基础 rating）
+  const handleSkipFeedback = async () => {
+    const index = currentFeedbackIndex
+    const rating = currentRating
+    const msg = messages[index]
+    if (!msg || msg.type !== 'bot' || msg.rating !== 0) {
+      setFeedbackModalVisible(false)
+      return
+    }
+
+    try {
+      await api.submitFeedback(userId, sessionId, index, lastUserMessage, msg.content, rating)
+      setMessages(prev => prev.map((m, i) =>
+        i === index ? { ...m, rating } : m
+      ))
+      message.success(rating === 1 ? '感谢您的认可！' : '感谢您的反馈，我们会持续改进！')
+    } catch (error) {
+      console.error('反馈提交失败:', error)
+    } finally {
+      setFeedbackModalVisible(false)
+    }
+  }
+
+  // 加载历史会话列表
+  const handleOpenSessionList = async () => {
+    try {
+      const data = await api.listSessions(userId)
+      setSessions(data || [])
+      setSessionListVisible(true)
+    } catch (error) {
+      console.error('加载会话列表失败:', error)
+      message.error('加载会话列表失败')
+    }
+  }
+
+  // 切换到历史会话
+  const handleLoadSession = async (histSessionId) => {
+    try {
+      const history = await api.getSessionHistory(histSessionId)
+      if (history && history.length > 0) {
+        const loadedMessages = [{ type: 'bot', content: '您好！我是智能购物助手，可以帮您推荐商品、解答售后问题。有什么可以帮您的吗？', products: [], rating: 0 }]
+        for (const entry of history) {
+          if (entry.startsWith('用户: ')) {
+            loadedMessages.push({ type: 'user', content: entry.substring(4) })
+          } else if (entry.startsWith('助手: ')) {
+            loadedMessages.push({ type: 'bot', content: entry.substring(4), products: [], rating: 0 })
+          }
+        }
+        setMessages(loadedMessages)
+        setSessionId(histSessionId)
+        setSessionListVisible(false)
+        message.success('已切换到历史会话')
+      }
+    } catch (error) {
+      console.error('加载历史会话失败:', error)
+      message.error('加载历史会话失败')
     }
   }
 
@@ -143,7 +269,11 @@ function ChatWidget() {
             padding: '12px 16px', background: '#1890ff', color: '#fff',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between'
           }}>
-            <span style={{ fontWeight: 600 }}><RobotOutlined style={{ marginRight: 8 }} />智能购物助手</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Button type="text" size="small" icon={<HistoryOutlined />} onClick={handleOpenSessionList}
+                style={{ color: '#fff' }} title="历史会话" />
+              <span style={{ fontWeight: 600 }}><RobotOutlined style={{ marginRight: 8 }} />智能购物助手</span>
+            </div>
             <Button type="text" size="small" icon={<CloseOutlined />} onClick={() => setVisible(false)}
               style={{ color: '#fff' }} />
           </div>
@@ -183,31 +313,33 @@ function ChatWidget() {
                       msg.content
                     )}
                   </div>
-                  
+
                   {/* 反馈按钮 - 仅对AI回复显示 */}
                   {msg.type === 'bot' && index > 0 && (
                     <div style={{ marginTop: 4, display: 'flex', gap: 8 }}>
-                      <Button 
-                        type="text" 
+                      <Button
+                        type="text"
                         size="small"
                         icon={msg.rating === 1 ? <LikeFilled style={{ color: '#52c41a' }} /> : <LikeOutlined />}
                         onClick={() => handleFeedback(index, 1)}
+                        disabled={msg.rating !== 0}
                         style={{ fontSize: 12, color: msg.rating === 1 ? '#52c41a' : '#999' }}
                       >
                         有用
                       </Button>
-                      <Button 
-                        type="text" 
+                      <Button
+                        type="text"
                         size="small"
                         icon={msg.rating === -1 ? <DislikeFilled style={{ color: '#ff4d4f' }} /> : <DislikeOutlined />}
                         onClick={() => handleFeedback(index, -1)}
+                        disabled={msg.rating !== 0}
                         style={{ fontSize: 12, color: msg.rating === -1 ? '#ff4d4f' : '#999' }}
                       >
                         没帮助
                       </Button>
                     </div>
                   )}
-                  
+
                   {/* 推荐商品 */}
                   {msg.products?.length > 0 && (
                     <div style={{ marginTop: 8 }}>
@@ -288,16 +420,107 @@ function ChatWidget() {
               disabled={loading}
               style={{ borderRadius: 20 }}
             />
-            <Button
-              type="primary"
-              shape="circle"
-              icon={<SendOutlined />}
-              onClick={() => handleSend()}
-              loading={loading}
-            />
+            {loading ? (
+              <Button
+                type="primary"
+                shape="circle"
+                danger
+                icon={<StopOutlined />}
+                onClick={handleCancel}
+              />
+            ) : (
+              <Button
+                type="primary"
+                shape="circle"
+                icon={<SendOutlined />}
+                onClick={() => handleSend()}
+              />
+            )}
           </div>
         </div>
       )}
+
+      {/* 反馈弹窗 */}
+      <Modal
+        title={currentRating === 1 ? '感谢您的认可！' : '感谢您的反馈！'}
+        open={feedbackModalVisible}
+        onCancel={() => setFeedbackModalVisible(false)}
+        footer={[
+          <Button key="skip" onClick={handleSkipFeedback}>跳过</Button>,
+          <Button key="submit" type="primary" onClick={handleSubmitFeedback}>提交</Button>,
+        ]}
+        destroyOnClose
+      >
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: 8, fontWeight: 500 }}>
+            {currentRating === -1 ? '您认为回答存在哪些问题？（可多选）' : '您觉得回答好在哪里？（可多选）'}
+          </div>
+          <Checkbox.Group
+            options={currentRating === -1 ? DISLIKE_REASONS : LIKE_REASONS}
+            value={selectedReasons}
+            onChange={(values) => setSelectedReasons(values)}
+            style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+          />
+        </div>
+        <div>
+          <div style={{ marginBottom: 8, fontWeight: 500 }}>补充说明（选填）：</div>
+          <Input.TextArea
+            value={feedbackComment}
+            onChange={(e) => setFeedbackComment(e.target.value)}
+            placeholder="请输入补充说明..."
+            rows={3}
+            maxLength={500}
+            showCount
+          />
+        </div>
+      </Modal>
+
+      {/* 历史会话列表 */}
+      <Drawer
+        title="历史会话"
+        placement="right"
+        onClose={() => setSessionListVisible(false)}
+        open={sessionListVisible}
+        width={320}
+        getContainer={false}
+        style={{ position: 'absolute' }}
+      >
+        {sessions.length === 0 ? (
+          <div style={{ color: '#999', textAlign: 'center', padding: 40 }}>暂无历史会话</div>
+        ) : (
+          <List
+            dataSource={sessions}
+            renderItem={(item) => (
+              <List.Item
+                style={{ cursor: 'pointer', padding: '12px 0' }}
+                onClick={() => handleLoadSession(item.sessionId)}
+              >
+                <List.Item.Meta
+                  title={
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {item.sessionId === sessionId && <Badge status="processing" />}
+                      <span style={{ fontSize: 13 }}>
+                        {item.summary || '会话 ' + (item.sessionId || '').substring(0, 8)}
+                      </span>
+                    </div>
+                  }
+                  description={
+                    <div style={{ fontSize: 11, color: '#999' }}>
+                      <span>{item.roundCount || 0} 轮对话</span>
+                      <span style={{ marginLeft: 12 }}>
+                        {item.createTime ? new Date(item.createTime).toLocaleDateString() : ''}
+                      </span>
+                      <span style={{ marginLeft: 12 }}>
+                        {item.status === 1 ? '进行中' : '已结束'}
+                      </span>
+                    </div>
+                  }
+                />
+              </List.Item>
+            )}
+          />
+        )}
+      </Drawer>
     </>
   )
 }

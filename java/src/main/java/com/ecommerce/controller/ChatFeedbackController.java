@@ -10,9 +10,11 @@ import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.*;
+
 /**
  * AI回复反馈控制器
- * 支持用户对AI回复点赞/点踩
+ * 支持用户对AI回复点赞/点踩，以及详细反馈收集
  */
 @Slf4j
 @RestController
@@ -31,16 +33,10 @@ public class ChatFeedbackController {
     @PostMapping("/feedback")
     public Result<FeedbackResultVO> submitFeedback(@RequestBody @Valid FeedbackRequestDTO dto) {
 
-        log.info("ChatFeedbackController.submitFeedback 用户={} 会话={} 索引={} 评分={}",
-                dto.getUserId(), dto.getSessionId(), dto.getMessageIndex(), dto.getRating());
+        log.info("ChatFeedbackController.submitFeedback 用户={} 会话={} 索引={} 评分={} 原因={}",
+                dto.getUserId(), dto.getSessionId(), dto.getMessageIndex(), dto.getRating(), dto.getFeedbackReason());
 
-        boolean success = chatFeedbackService.submitFeedback(
-                dto.getUserId(), 
-                dto.getSessionId(), 
-                dto.getMessageIndex(),
-                dto.getUserMessage(), 
-                dto.getAiMessage(), 
-                dto.getRating());
+        boolean success = chatFeedbackService.submitFeedback(dto);
 
         if (success) {
             return Result.success(FeedbackResultVO.builder()
@@ -75,5 +71,32 @@ public class ChatFeedbackController {
         log.info("ChatFeedbackController.getUserFeedbackStats 用户={}", userId);
         SatisfactionStatsVO stats = chatFeedbackService.getUserFeedbackStats(userId);
         return Result.success(stats);
+    }
+
+    /**
+     * 获取反馈原因选项列表
+     *
+     * @return 反馈原因选项
+     */
+    @GetMapping("/feedback/reasons")
+    public Result<Map<String, Object>> getFeedbackReasons() {
+        log.info("ChatFeedbackController.getFeedbackReasons 获取反馈原因选项");
+        Map<String, Object> reasons = new LinkedHashMap<>();
+        // 拉踩原因
+        reasons.put("dislike", List.of(
+                Map.of("label", "回答不准确", "value", "inaccurate"),
+                Map.of("label", "答非所问", "value", "irrelevant"),
+                Map.of("label", "信息不完整", "value", "incomplete"),
+                Map.of("label", "回答太笼统", "value", "too_generic"),
+                Map.of("label", "信息过时", "value", "outdated"),
+                Map.of("label", "其他", "value", "other")
+        ));
+        // 点赞原因
+        reasons.put("like", List.of(
+                Map.of("label", "有帮助", "value", "helpful"),
+                Map.of("label", "节省了时间", "value", "saved_time"),
+                Map.of("label", "其他", "value", "other")
+        ));
+        return Result.success(reasons);
     }
 }
