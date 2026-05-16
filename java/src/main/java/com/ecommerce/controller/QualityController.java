@@ -45,6 +45,22 @@ public class QualityController {
     }
 
     /**
+     * [测试用] 手动触发离线质量分析
+     * POST /api/v1/quality/run-analysis
+     */
+    @PostMapping("/run-analysis")
+    public Result<String> runAnalysis() {
+        log.info("QualityController.runAnalysis 手动触发离线分析");
+        try {
+            agentQualityAnalysisService.runDailyAnalysis();
+            return Result.success("离线分析执行完成");
+        } catch (Exception e) {
+            log.error("QualityController.runAnalysis 执行失败: {}", e.getMessage(), e);
+            return Result.error(500, "离线分析执行失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 获取全局质量概览（近N天汇总）
      */
     @GetMapping("/overview")
