@@ -141,9 +141,7 @@ public class ConversationSessionServiceImpl extends ServiceImpl<ConversationSess
         try {
             // 步骤2: 解析 round_intents JSON
             List<Map<String, Object>> roundIntents = objectMapper.readValue(
-                    session.getRoundIntents(),
-                    new TypeReference<List<Map<String, Object>>>() {
-                    }
+                    session.getRoundIntents(), new TypeReference<>() {}
             );
             if (roundIntents.isEmpty()) {
                 return DEFAULT_AGENT;

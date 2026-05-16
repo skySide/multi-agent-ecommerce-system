@@ -165,6 +165,31 @@ public class ProductSearchTool {
     }
 
     /**
+     * 根据商品ID批量查询商品详情
+     */
+    @Tool(name = "getProductsByIds", description = "【批量ID查询】根据商品ID列表批量获取商品详情。适用于已知商品ID、需要回表获取完整商品信息的场景，比如CompareAgent委托查商品时使用")
+    public List<Product> getProductsByIds(
+            @ToolParam(description = "商品ID列表，如[\"P001\",\"P002\"]") List<String> productIds) {
+        if (CollectionUtils.isEmpty(productIds)) {
+            log.warn("ProductSearchTool.getProductsByIds - 参数为空");
+            return Collections.emptyList();
+        }
+
+        log.info("ProductSearchTool.getProductsByIds - 批量查询商品, ids: {}", productIds);
+
+        List<Product> products = productService.listByProductIds(productIds);
+        if (CollectionUtils.isEmpty(products)) {
+            log.warn("ProductSearchTool.getProductsByIds - 批量查询无结果, ids: {}", productIds);
+            return Collections.emptyList();
+        }
+
+        // 按输入顺序重排
+        List<Product> ordered = reorderByIds(products, productIds);
+        log.info("ProductSearchTool.getProductsByIds - 批量查询完成, ids.size: {}, 结果: {}条", productIds.size(), ordered.size());
+        return ordered;
+    }
+
+    /**
      * 按指定ID顺序重排商品列表
      */
     private List<Product> reorderByIds(List<Product> products, List<String> orderedIds) {
