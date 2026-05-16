@@ -6,6 +6,9 @@ package com.ecommerce.common.enums;
  */
 public enum FeedbackRatingEnum {
 
+    /** 无操作 */
+    NONE(0, "无操作"),
+
     /** 点赞 */
     LIKE(1, "点赞"),
 
