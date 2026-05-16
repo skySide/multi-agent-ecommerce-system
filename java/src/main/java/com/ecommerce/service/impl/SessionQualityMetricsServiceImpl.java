@@ -10,6 +10,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.List;
+
 /**
  * 会话质量指标服务实现类
  * 负责记录和统计会话质量事件
@@ -64,5 +68,25 @@ public class SessionQualityMetricsServiceImpl extends ServiceImpl<SessionQuality
     public void recordTransferToHuman(String sessionId, String userId, String metricValueJson) {
         // 步骤1: 记录转人工事件
         recordMetric(sessionId, userId, QualityConstants.METRIC_TRANSFER_TO_HUMAN, metricValueJson);
+    }
+
+    @Override
+    public List<SessionQualityMetrics> listByTimeRangeAndTypes(LocalDateTime start, LocalDateTime end,
+                                                                List<String> metricTypes) {
+        // 步骤1: 参数校验
+        if (start == null || end == null || metricTypes == null || metricTypes.isEmpty()) {
+            log.warn("SessionQualityMetricsService.listByTimeRangeAndTypes - 参数不完整");
+            return Collections.emptyList();
+        }
+
+        // 步骤2: 按时间范围和指标类型查询
+        List<SessionQualityMetrics> result = lambdaQuery()
+                .ge(SessionQualityMetrics::getCreateTime, start)
+                .lt(SessionQualityMetrics::getCreateTime, end)
+                .in(SessionQualityMetrics::getMetricType, metricTypes)
+                .list();
+
+        log.info("SessionQualityMetricsService.listByTimeRangeAndTypes - 查询完成, 记录数: {}", result.size());
+        return result;
     }
 }

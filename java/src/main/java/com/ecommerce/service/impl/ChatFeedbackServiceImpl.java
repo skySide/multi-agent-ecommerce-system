@@ -1,6 +1,7 @@
 package com.ecommerce.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.ecommerce.common.enums.FeedbackRatingEnum;
 import com.ecommerce.dto.FeedbackRequestDTO;
 import com.ecommerce.entity.ChatFeedback;
 import com.ecommerce.mapper.ChatFeedbackMapper;
@@ -13,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -38,7 +40,7 @@ public class ChatFeedbackServiceImpl extends ServiceImpl<ChatFeedbackMapper, Cha
         }
 
         // 步骤2: 校验评分值
-        if (dto.getRating() != 1 && dto.getRating() != -1) {
+        if (FeedbackRatingEnum.getByCode(dto.getRating()) == null) {
             log.error("ChatFeedbackService.submitFeedback - 评分值无效: {}", dto.getRating());
             return false;
         }
@@ -90,9 +92,9 @@ public class ChatFeedbackServiceImpl extends ServiceImpl<ChatFeedbackMapper, Cha
                 Integer rating = (Integer) stat.get("rating");
                 Long count = (Long) stat.get("count");
                 if (rating != null && count != null) {
-                    if (rating == 1) {
+                    if (FeedbackRatingEnum.LIKE.getCode().equals(rating)) {
                         thumbsUp = count;
-                    } else if (rating == -1) {
+                    } else if (FeedbackRatingEnum.DISLIKE.getCode().equals(rating)) {
                         thumbsDown = count;
                     }
                 }
@@ -104,11 +106,11 @@ public class ChatFeedbackServiceImpl extends ServiceImpl<ChatFeedbackMapper, Cha
             // 构建评分分布
             List<SatisfactionStatsVO.RatingDistribution> distribution = new ArrayList<>();
             distribution.add(SatisfactionStatsVO.RatingDistribution.builder()
-                    .rating(1)
+                    .rating(FeedbackRatingEnum.LIKE.getCode())
                     .count(thumbsUp)
                     .build());
             distribution.add(SatisfactionStatsVO.RatingDistribution.builder()
-                    .rating(-1)
+                    .rating(FeedbackRatingEnum.DISLIKE.getCode())
                     .count(thumbsDown)
                     .build());
 
@@ -145,9 +147,9 @@ public class ChatFeedbackServiceImpl extends ServiceImpl<ChatFeedbackMapper, Cha
                 Integer rating = (Integer) stat.get("rating");
                 Long count = (Long) stat.get("count");
                 if (rating != null && count != null) {
-                    if (rating == 1) {
+                    if (FeedbackRatingEnum.LIKE.getCode().equals(rating)) {
                         thumbsUp = count;
-                    } else if (rating == -1) {
+                    } else if (FeedbackRatingEnum.DISLIKE.getCode().equals(rating)) {
                         thumbsDown = count;
                     }
                 }
@@ -159,11 +161,11 @@ public class ChatFeedbackServiceImpl extends ServiceImpl<ChatFeedbackMapper, Cha
             // 构建评分分布
             List<SatisfactionStatsVO.RatingDistribution> distribution = new ArrayList<>();
             distribution.add(SatisfactionStatsVO.RatingDistribution.builder()
-                    .rating(1)
+                    .rating(FeedbackRatingEnum.LIKE.getCode())
                     .count(thumbsUp)
                     .build());
             distribution.add(SatisfactionStatsVO.RatingDistribution.builder()
-                    .rating(-1)
+                    .rating(FeedbackRatingEnum.DISLIKE.getCode())
                     .count(thumbsDown)
                     .build());
 
@@ -184,5 +186,25 @@ public class ChatFeedbackServiceImpl extends ServiceImpl<ChatFeedbackMapper, Cha
                     .ratingDistribution(new ArrayList<>())
                     .build();
         }
+    }
+
+    @Override
+    public List<ChatFeedback> listByTimeRangeAndRatings(LocalDateTime start, LocalDateTime end, List<Integer> ratings) {
+        // 步骤1: 参数校验
+        if (start == null || end == null || ratings == null || ratings.isEmpty()) {
+            log.warn("ChatFeedbackService.listByTimeRangeAndRatings - 参数不完整, start: {}, end: {}, ratings: {}",
+                    start, end, ratings);
+            return Collections.emptyList();
+        }
+
+        // 步骤2: 按时间范围和评分查询
+        List<ChatFeedback> result = lambdaQuery()
+                .ge(ChatFeedback::getCreateTime, start)
+                .lt(ChatFeedback::getCreateTime, end)
+                .in(ChatFeedback::getRating, ratings)
+                .list();
+
+        log.info("ChatFeedbackService.listByTimeRangeAndRatings - 查询完成, 记录数: {}", result.size());
+        return result;
     }
 }

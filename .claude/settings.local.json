@@ -3,7 +3,11 @@
     "allow": [
       "Bash(where mvn *)",
       "Read(//c/Program Files//**)",
-      "Read(//c//**)"
+      "Read(//c//**)",
+      "Bash(npx vite *)",
+      "Bash(mvn compile *)",
+      "Bash(mkdir -p \"E:\\\\IDEAworkspace\\\\代码\\\\multi-agent-ecommerce-system\\\\.claude\\\\skills\")",
+      "Bash(cp \"E:\\\\IDEAworkspace\\\\代码\\\\multi-agent-ecommerce-system\\\\.kiro\\\\steering\\\\java-code-standards.md\" \"E:\\\\IDEAworkspace\\\\代码\\\\multi-agent-ecommerce-system\\\\.claude\\\\skills\\\\java-code-standards.md\")"
     ]
   }
 }

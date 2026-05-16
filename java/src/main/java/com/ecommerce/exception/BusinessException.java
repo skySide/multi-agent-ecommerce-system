@@ -1,6 +1,6 @@
 package com.ecommerce.exception;
 
-import com.ecommerce.common.enums.ErrorCode;
+import com.ecommerce.common.enums.ErrorCodeEnum;
 import lombok.Getter;
 
 /**
@@ -14,11 +14,11 @@ public class BusinessException extends RuntimeException {
 
     /**
      * 构造方法
-     * @param errorCode 错误码枚举
+     * @param errorCodeEnum 错误码枚举
      */
-    public BusinessException(ErrorCode errorCode) {
-        super(errorCode.getMessage());
-        this.code = errorCode.getCode();
+    public BusinessException(ErrorCodeEnum errorCodeEnum) {
+        super(errorCodeEnum.getMessage());
+        this.code = errorCodeEnum.getCode();
     }
 
     /**

@@ -1,7 +1,7 @@
 package com.ecommerce.exception;
 
 import com.ecommerce.common.Result;
-import com.ecommerce.common.enums.ErrorCode;
+import com.ecommerce.common.enums.ErrorCodeEnum;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -34,7 +34,7 @@ public class GlobalExceptionHandler {
     public Result<Void> handleMethodArgumentNotValidException(MethodArgumentNotValidException e) {
         String message = e.getBindingResult().getAllErrors().get(0).getDefaultMessage();
         log.warn("Parameter validation failed: {}", message);
-        return Result.error(ErrorCode.PARAM_ERROR.getCode(), message);
+        return Result.error(ErrorCodeEnum.PARAM_ERROR.getCode(), message);
     }
 
     /**
@@ -45,6 +45,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     public Result<Void> handleException(Exception e) {
         log.error("System error occurred", e);
-        return Result.error(ErrorCode.SYSTEM_ERROR);
+        return Result.error(ErrorCodeEnum.SYSTEM_ERROR);
     }
 }

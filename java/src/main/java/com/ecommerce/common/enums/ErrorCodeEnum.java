@@ -8,7 +8,7 @@ import lombok.Getter;
  */
 @Getter
 @AllArgsConstructor
-public enum ErrorCode {
+public enum ErrorCodeEnum {
 
     /** 成功 */
     SUCCESS(200, "操作成功"),

@@ -194,6 +194,20 @@ class ApiService {
     return this.request(`${API_BASE_URL}/v1/chat/feedback/reasons`)
   }
 
+  // ===== 质量看板 =====
+  async getQualityOverview(days = 7) {
+    return this.request(`${API_BASE_URL}/v1/quality/overview?days=${days}`)
+  }
+
+  async getAgentStats(date) {
+    const query = date ? `?date=${date}` : ''
+    return this.request(`${API_BASE_URL}/v1/quality/agent-stats${query}`)
+  }
+
+  async getAgentTrend(agentName, days = 30) {
+    return this.request(`${API_BASE_URL}/v1/quality/agent-stats/${agentName}?days=${days}`)
+  }
+
   // ===== 实验 =====
   async getExperiments() {
     return this.request(`${API_BASE_URL}/v1/experiments`)

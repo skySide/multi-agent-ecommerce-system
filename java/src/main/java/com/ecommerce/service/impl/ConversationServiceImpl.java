@@ -5,15 +5,19 @@ import com.ecommerce.entity.Product;
 import com.ecommerce.model.AgentResult;
 import com.ecommerce.model.ConversationRequest;
 import com.ecommerce.model.ConversationResponse;
+import com.ecommerce.common.constants.QualityConstants;
 import com.ecommerce.service.ConversationService;
 import com.ecommerce.service.ConversationSessionService;
 import com.ecommerce.service.MemoryService;
+import com.ecommerce.service.SessionQualityMetricsService;
 import com.ecommerce.agent.ConversationAgent;
 import com.ecommerce.vo.SessionSummaryVO;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.CancellationException;
 import java.util.stream.Collectors;
@@ -34,6 +38,9 @@ public class ConversationServiceImpl implements ConversationService {
 
     @Resource
     private MemoryService memoryService;
+
+    @Resource
+    private SessionQualityMetricsService sessionQualityMetricsService;
 
     @Override
     public ConversationResponse chat(ConversationRequest request) {
@@ -58,6 +65,23 @@ public class ConversationServiceImpl implements ConversationService {
                     sessionId, session.getUserId(), userId);
             sessionId = createSession(userId);
             session = conversationSessionService.getBySessionId(sessionId);
+        }
+
+        // 步骤2.5: 会话恢复检测（status=0 的会话收到新消息时重新激活）
+        if (session.getStatus() != null && session.getStatus() == 0) {
+            LocalDateTime lastUpdate = session.getUpdateTime();
+            long gapMinutes = lastUpdate != null
+                    ? Duration.between(lastUpdate, LocalDateTime.now()).toMinutes()
+                    : 0;
+            session.setStatus(1);
+            conversationSessionService.updateById(session);
+            log.info("ConversationService.chat - 会话重新激活, sessionId={}, gapMinutes={}", sessionId, gapMinutes);
+            if (gapMinutes > QualityConstants.SESSION_TIMEOUT_MINUTES) {
+                String metricValue = String.format(
+                        "{\"gap_minutes\":%d,\"previous_status\":0}", gapMinutes);
+                sessionQualityMetricsService.recordMetric(sessionId, userId,
+                        QualityConstants.METRIC_SESSION_RESUMED, metricValue);
+            }
         }
 
         // 步骤3: 获取短期记忆

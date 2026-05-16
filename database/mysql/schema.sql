@@ -299,3 +299,28 @@ CREATE TABLE `session_quality_metrics` (
 
 SET FOREIGN_KEY_CHECKS = 1;
 
+-- ----------------------------
+-- Agent质量分析结果表（离线任务产出）
+-- ----------------------------
+DROP TABLE IF EXISTS `agent_quality_analysis`;
+CREATE TABLE `agent_quality_analysis` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    `agent_name` VARCHAR(50) NOT NULL DEFAULT '' COMMENT 'Agent名称: recommend/product_query/knowledge_query/compare/chitchat',
+    `analysis_date` DATE NOT NULL COMMENT '分析日期',
+    `total_feedback` INT DEFAULT 0 COMMENT '总反馈数',
+    `like_count` INT DEFAULT 0 COMMENT '点赞数',
+    `dislike_count` INT DEFAULT 0 COMMENT '点踩数',
+    `satisfaction_rate` DECIMAL(5,2) DEFAULT 0.00 COMMENT '满意度(%)',
+    `top_dislike_reasons` TEXT COMMENT '差评原因Top5 JSON',
+    `abrupt_end_count` INT DEFAULT 0 COMMENT '突然结束会话数',
+    `repeated_question_count` INT DEFAULT 0 COMMENT '重复提问次数',
+    `transfer_to_human_count` INT DEFAULT 0 COMMENT '转人工次数',
+    `total_sessions` INT DEFAULT 0 COMMENT '总会话数',
+    `avg_rounds` DECIMAL(5,1) DEFAULT 0.0 COMMENT '平均对话轮数',
+    `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除',
+    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    UNIQUE KEY `uk_agent_date` (`agent_name`, `analysis_date`),
+    INDEX `idx_analysis_date` (`analysis_date`),
+    INDEX `idx_agent_name` (`agent_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Agent质量分析结果表';
+

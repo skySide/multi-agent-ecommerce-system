@@ -1,7 +1,7 @@
 package com.ecommerce.controller;
 
 import com.ecommerce.common.Result;
-import com.ecommerce.common.enums.ErrorCode;
+import com.ecommerce.common.enums.ErrorCodeEnum;
 import com.ecommerce.dto.ProductCreateDTO;
 import com.ecommerce.entity.Product;
 import com.ecommerce.service.ProductService;
@@ -127,7 +127,7 @@ public class ProductController {
                     .productId(product.getProductId())
                     .build());
         }
-        return Result.error(ErrorCode.PRODUCT_ERROR, "创建商品失败");
+        return Result.error(ErrorCodeEnum.PRODUCT_ERROR, "创建商品失败");
     }
 
     /**

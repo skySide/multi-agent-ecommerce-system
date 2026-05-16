@@ -1,7 +1,7 @@
 package com.ecommerce.controller;
 
 import com.ecommerce.common.Result;
-import com.ecommerce.common.enums.ErrorCode;
+import com.ecommerce.common.enums.ErrorCodeEnum;
 import com.ecommerce.dto.BehaviorRecordDTO;
 import com.ecommerce.entity.UserBehavior;
 import com.ecommerce.service.UserBehaviorService;
@@ -47,7 +47,7 @@ public class BehaviorController {
                     .success(true)
                     .build());
         }
-        return Result.error(ErrorCode.BEHAVIOR_ERROR, "记录行为失败");
+        return Result.error(ErrorCodeEnum.BEHAVIOR_ERROR, "记录行为失败");
     }
 
     /**

@@ -1,7 +1,7 @@
 package com.ecommerce.controller;
 
 import com.ecommerce.common.Result;
-import com.ecommerce.common.enums.ErrorCode;
+import com.ecommerce.common.enums.ErrorCodeEnum;
 import com.ecommerce.dto.LoginRequestDTO;
 import com.ecommerce.dto.UserCreateDTO;
 import com.ecommerce.entity.User;
@@ -73,7 +73,7 @@ public class UserController {
             UserAuthVO authVO = userService.register(dto);
             return Result.success(authVO);
         } catch (RuntimeException e) {
-            return Result.error(ErrorCode.USER_ERROR, e.getMessage());
+            return Result.error(ErrorCodeEnum.USER_ERROR, e.getMessage());
         }
     }
 
@@ -87,7 +87,7 @@ public class UserController {
             UserAuthVO authVO = userService.login(dto);
             return Result.success(authVO);
         } catch (RuntimeException e) {
-            return Result.error(ErrorCode.UNAUTHORIZED, e.getMessage());
+            return Result.error(ErrorCodeEnum.UNAUTHORIZED, e.getMessage());
         }
     }
 

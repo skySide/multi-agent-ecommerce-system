@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { Input, Button, Avatar, Spin, Tag, Card, message, Modal, Checkbox, Drawer, List, Badge } from 'antd'
-import { MessageOutlined, CloseOutlined, SendOutlined, RobotOutlined, UserOutlined, ShoppingOutlined, LikeOutlined, LikeFilled, DislikeOutlined, DislikeFilled, StopOutlined, HistoryOutlined } from '@ant-design/icons'
+import { Input, Button, Avatar, Spin, Tag, Card, message, Modal, Checkbox, List, Badge, Divider } from 'antd'
+import { MessageOutlined, CloseOutlined, SendOutlined, RobotOutlined, UserOutlined, ShoppingOutlined, LikeOutlined, LikeFilled, DislikeOutlined, DislikeFilled, StopOutlined, HistoryOutlined, LeftOutlined, RightOutlined, PlusOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -51,8 +51,10 @@ function ChatWidget() {
   const [selectedReasons, setSelectedReasons] = useState([])
   const [feedbackComment, setFeedbackComment] = useState('')
 
-  // 历史会话状态
-  const [sessionListVisible, setSessionListVisible] = useState(false)
+  // 展开/收起状态
+  const [expanded, setExpanded] = useState(false)
+
+  // 历史会话数据
   const [sessions, setSessions] = useState([])
 
   // 未登录：不渲染对话按钮和窗口
@@ -198,15 +200,17 @@ function ChatWidget() {
     }
   }
 
-  // 加载历史会话列表
-  const handleOpenSessionList = async () => {
-    try {
-      const data = await api.listSessions(userId)
-      setSessions(data || [])
-      setSessionListVisible(true)
-    } catch (error) {
-      console.error('加载会话列表失败:', error)
-      message.error('加载会话列表失败')
+  // 切换展开/收起，展开时加载会话列表
+  const handleToggleExpand = async () => {
+    const nextExpanded = !expanded
+    setExpanded(nextExpanded)
+    if (nextExpanded) {
+      try {
+        const data = await api.listSessions(userId)
+        setSessions(data || [])
+      } catch (error) {
+        console.error('加载会话列表失败:', error)
+      }
     }
   }
 
@@ -225,13 +229,20 @@ function ChatWidget() {
         }
         setMessages(loadedMessages)
         setSessionId(histSessionId)
-        setSessionListVisible(false)
+        setExpanded(false)
         message.success('已切换到历史会话')
       }
     } catch (error) {
       console.error('加载历史会话失败:', error)
       message.error('加载历史会话失败')
     }
+  }
+
+  // 新增会话
+  const handleNewSession = () => {
+    setMessages([{ type: 'bot', content: '您好！我是智能购物助手，可以帮您推荐商品、解答售后问题。有什么可以帮您的吗？', products: [], rating: 0 }])
+    setSessionId(null)
+    setExpanded(false)
   }
 
   const showSuggestions = messages.length <= 1
@@ -258,11 +269,12 @@ function ChatWidget() {
       {visible && (
         <div style={{
           position: 'fixed', bottom: 30, right: 30,
-          width: 400, height: 580, zIndex: 1000,
+          width: expanded ? 900 : 400, height: expanded ? 600 : 580, zIndex: 1000,
           display: 'flex', flexDirection: 'column',
           background: '#fff', borderRadius: 12,
           boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
-          overflow: 'hidden'
+          overflow: 'hidden',
+          transition: 'width 0.25s ease, height 0.25s ease'
         }}>
           {/* 标题栏 */}
           <div style={{
@@ -270,14 +282,82 @@ function ChatWidget() {
             display: 'flex', alignItems: 'center', justifyContent: 'space-between'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Button type="text" size="small" icon={<HistoryOutlined />} onClick={handleOpenSessionList}
-                style={{ color: '#fff' }} title="历史会话" />
+              <Button type="text" size="small"
+                icon={expanded ? <LeftOutlined /> : <RightOutlined />}
+                onClick={handleToggleExpand}
+                style={{ color: '#fff' }} title={expanded ? '收起' : '展开'} />
               <span style={{ fontWeight: 600 }}><RobotOutlined style={{ marginRight: 8 }} />智能购物助手</span>
             </div>
             <Button type="text" size="small" icon={<CloseOutlined />} onClick={() => setVisible(false)}
               style={{ color: '#fff' }} />
           </div>
 
+          {/* 展开模式：左侧菜单栏 + 右侧对话区域 */}
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+            {expanded && (
+              <div style={{
+                width: 220, borderRight: '1px solid #f0f0f0',
+                display: 'flex', flexDirection: 'column',
+                background: '#fafafa'
+              }}>
+                {/* 新增会话 */}
+                <div style={{ padding: '12px' }}>
+                  <Button type="primary" block icon={<PlusOutlined />}
+                    onClick={handleNewSession}>
+                    新增会话
+                  </Button>
+                </div>
+                <Divider style={{ margin: 0 }} />
+                {/* 历史会话列表 */}
+                <div style={{ flex: 1, overflowY: 'auto', padding: '0' }}>
+                  <div style={{ padding: '8px 12px', fontSize: 12, color: '#999', fontWeight: 500 }}>
+                    <HistoryOutlined style={{ marginRight: 6 }} />历史会话
+                  </div>
+                  {sessions.length === 0 ? (
+                    <div style={{ color: '#999', textAlign: 'center', padding: 20, fontSize: 12 }}>
+                      暂无历史会话
+                    </div>
+                  ) : (
+                    <List
+                      dataSource={sessions}
+                      size="small"
+                      split={false}
+                      renderItem={(item) => (
+                        <List.Item
+                          style={{
+                            cursor: 'pointer', padding: '10px 12px',
+                            background: item.sessionId === sessionId ? '#e6f7ff' : 'transparent',
+                            borderBottom: '1px solid #f5f5f5'
+                          }}
+                          onClick={() => handleLoadSession(item.sessionId)}
+                        >
+                          <List.Item.Meta
+                            title={
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                {item.sessionId === sessionId && <Badge status="processing" />}
+                                <span style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
+                                  {item.summary || '会话 ' + (item.sessionId || '').substring(0, 8)}
+                                </span>
+                              </div>
+                            }
+                            description={
+                              <div style={{ fontSize: 11, color: '#999' }}>
+                                <span>{item.roundCount || 0} 轮</span>
+                                <span style={{ marginLeft: 8 }}>
+                                  {item.createTime ? new Date(item.createTime).toLocaleDateString() : ''}
+                                </span>
+                              </div>
+                            }
+                          />
+                        </List.Item>
+                      )}
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+            {/* 右侧对话区域 */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* 消息区域 */}
           <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
             {messages.map((msg, index) => (
@@ -437,6 +517,8 @@ function ChatWidget() {
               />
             )}
           </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -474,53 +556,6 @@ function ChatWidget() {
           />
         </div>
       </Modal>
-
-      {/* 历史会话列表 */}
-      <Drawer
-        title="历史会话"
-        placement="right"
-        onClose={() => setSessionListVisible(false)}
-        open={sessionListVisible}
-        width={320}
-        getContainer={false}
-        style={{ position: 'absolute' }}
-      >
-        {sessions.length === 0 ? (
-          <div style={{ color: '#999', textAlign: 'center', padding: 40 }}>暂无历史会话</div>
-        ) : (
-          <List
-            dataSource={sessions}
-            renderItem={(item) => (
-              <List.Item
-                style={{ cursor: 'pointer', padding: '12px 0' }}
-                onClick={() => handleLoadSession(item.sessionId)}
-              >
-                <List.Item.Meta
-                  title={
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {item.sessionId === sessionId && <Badge status="processing" />}
-                      <span style={{ fontSize: 13 }}>
-                        {item.summary || '会话 ' + (item.sessionId || '').substring(0, 8)}
-                      </span>
-                    </div>
-                  }
-                  description={
-                    <div style={{ fontSize: 11, color: '#999' }}>
-                      <span>{item.roundCount || 0} 轮对话</span>
-                      <span style={{ marginLeft: 12 }}>
-                        {item.createTime ? new Date(item.createTime).toLocaleDateString() : ''}
-                      </span>
-                      <span style={{ marginLeft: 12 }}>
-                        {item.status === 1 ? '进行中' : '已结束'}
-                      </span>
-                    </div>
-                  }
-                />
-              </List.Item>
-            )}
-          />
-        )}
-      </Drawer>
     </>
   )
 }

@@ -1,6 +1,6 @@
 package com.ecommerce.common;
 
-import com.ecommerce.common.enums.ErrorCode;
+import com.ecommerce.common.enums.ErrorCodeEnum;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -31,7 +31,7 @@ public class Result<T> implements Serializable {
      * @return 成功结果
      */
     public static <T> Result<T> success(T data) {
-        return new Result<>(ErrorCode.SUCCESS.getCode(), ErrorCode.SUCCESS.getMessage(), data, System.currentTimeMillis());
+        return new Result<>(ErrorCodeEnum.SUCCESS.getCode(), ErrorCodeEnum.SUCCESS.getMessage(), data, System.currentTimeMillis());
     }
 
     /**
@@ -41,26 +41,26 @@ public class Result<T> implements Serializable {
      * @return 成功结果
      */
     public static <T> Result<T> success(String message, T data) {
-        return new Result<>(ErrorCode.SUCCESS.getCode(), message, data, System.currentTimeMillis());
+        return new Result<>(ErrorCodeEnum.SUCCESS.getCode(), message, data, System.currentTimeMillis());
     }
 
     /**
      * 失败返回结果
-     * @param errorCode 错误码枚举
+     * @param errorCodeEnum 错误码枚举
      * @return 失败结果
      */
-    public static <T> Result<T> error(ErrorCode errorCode) {
-        return new Result<>(errorCode.getCode(), errorCode.getMessage(), null, System.currentTimeMillis());
+    public static <T> Result<T> error(ErrorCodeEnum errorCodeEnum) {
+        return new Result<>(errorCodeEnum.getCode(), errorCodeEnum.getMessage(), null, System.currentTimeMillis());
     }
 
     /**
      * 失败返回结果（自定义错误信息）
-     * @param errorCode 错误码枚举
+     * @param errorCodeEnum 错误码枚举
      * @param message 错误信息
      * @return 失败结果
      */
-    public static <T> Result<T> error(ErrorCode errorCode, String message) {
-        return new Result<>(errorCode.getCode(), message, null, System.currentTimeMillis());
+    public static <T> Result<T> error(ErrorCodeEnum errorCodeEnum, String message) {
+        return new Result<>(errorCodeEnum.getCode(), message, null, System.currentTimeMillis());
     }
 
     /**
@@ -79,7 +79,7 @@ public class Result<T> implements Serializable {
      * @return 失败结果
      */
     public static <T> Result<T> error(String message) {
-        return new Result<>(ErrorCode.SYSTEM_ERROR.getCode(), message, null, System.currentTimeMillis());
+        return new Result<>(ErrorCodeEnum.SYSTEM_ERROR.getCode(), message, null, System.currentTimeMillis());
     }
 
     /**
@@ -88,7 +88,7 @@ public class Result<T> implements Serializable {
      * @return 失败结果
      */
     public static <T> Result<T> badRequest(String message) {
-        return new Result<>(ErrorCode.PARAM_ERROR.getCode(), message, null, System.currentTimeMillis());
+        return new Result<>(ErrorCodeEnum.PARAM_ERROR.getCode(), message, null, System.currentTimeMillis());
     }
 
     /**
@@ -97,7 +97,7 @@ public class Result<T> implements Serializable {
      * @return 失败结果
      */
     public static <T> Result<T> unauthorized(String message) {
-        return new Result<>(ErrorCode.UNAUTHORIZED.getCode(), message, null, System.currentTimeMillis());
+        return new Result<>(ErrorCodeEnum.UNAUTHORIZED.getCode(), message, null, System.currentTimeMillis());
     }
 
     /**
@@ -106,7 +106,7 @@ public class Result<T> implements Serializable {
      * @return 失败结果
      */
     public static <T> Result<T> forbidden(String message) {
-        return new Result<>(ErrorCode.FORBIDDEN.getCode(), message, null, System.currentTimeMillis());
+        return new Result<>(ErrorCodeEnum.FORBIDDEN.getCode(), message, null, System.currentTimeMillis());
     }
 
     /**
@@ -115,6 +115,6 @@ public class Result<T> implements Serializable {
      * @return 失败结果
      */
     public static <T> Result<T> notFound(String message) {
-        return new Result<>(ErrorCode.NOT_FOUND.getCode(), message, null, System.currentTimeMillis());
+        return new Result<>(ErrorCodeEnum.NOT_FOUND.getCode(), message, null, System.currentTimeMillis());
     }
 }

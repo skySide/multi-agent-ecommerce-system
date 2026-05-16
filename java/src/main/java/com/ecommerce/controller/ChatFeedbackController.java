@@ -1,6 +1,7 @@
 package com.ecommerce.controller;
 
 import com.ecommerce.common.Result;
+import com.ecommerce.common.enums.FeedbackRatingEnum;
 import com.ecommerce.dto.FeedbackRequestDTO;
 import com.ecommerce.service.ChatFeedbackService;
 import com.ecommerce.vo.FeedbackResultVO;
@@ -40,7 +41,7 @@ public class ChatFeedbackController {
 
         if (success) {
             return Result.success(FeedbackResultVO.builder()
-                    .message(dto.getRating() == 1 ? "感谢您的认可！" : "感谢您的反馈，我们会持续改进！")
+                    .message(FeedbackRatingEnum.LIKE.getCode().equals(dto.getRating()) ? "感谢您的认可！" : "感谢您的反馈，我们会持续改进！")
                     .rating(dto.getRating())
                     .build());
         } else {

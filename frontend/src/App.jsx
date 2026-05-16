@@ -6,6 +6,7 @@ import SearchPage from './pages/SearchPage'
 import ProductDetailPage from './pages/ProductDetailPage'
 import UserCenterPage from './pages/UserCenterPage'
 import LoginPage from './pages/LoginPage'
+import QualityDashboardPage from './pages/QualityDashboardPage'
 import ChatWidget from './components/ChatWidget'
 
 const { Header, Content, Footer } = Layout
@@ -62,6 +63,9 @@ function App() {
             <Menu.Item key="user">
               <Link to="/user">个人中心</Link>
             </Menu.Item>
+            <Menu.Item key="quality">
+              <Link to="/quality">质量看板</Link>
+            </Menu.Item>
           </Menu>
           <div style={{ color: 'white', marginLeft: 'auto' }}>
             {token ? (
@@ -85,6 +89,7 @@ function App() {
             <Route path="/product/:id" element={<ProductDetailPage />} />
             <Route path="/user" element={<UserCenterPage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/quality" element={<QualityDashboardPage />} />
           </Routes>
         </Content>
         <ChatWidget />

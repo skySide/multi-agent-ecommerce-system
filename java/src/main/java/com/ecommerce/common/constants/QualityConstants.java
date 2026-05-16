@@ -32,6 +32,9 @@ public class QualityConstants {
     /** 低参与度 */
     public static final String METRIC_LOW_ENGAGEMENT = "low_engagement";
 
+    /** 会话恢复（用户离开超过30分钟后回来继续对话） */
+    public static final String METRIC_SESSION_RESUMED = "session_resumed";
+
     // ===== 拉踩反馈原因 =====
 
     /** 回答不准确 */

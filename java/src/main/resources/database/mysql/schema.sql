@@ -15,7 +15,6 @@ CREATE TABLE `user` (
     `username` VARCHAR(50) NOT NULL DEFAULT '' COMMENT '用户名',
     `email` VARCHAR(100) DEFAULT '' COMMENT '邮箱',
     `phone` VARCHAR(20) DEFAULT '' COMMENT '手机号',
-    `password` VARCHAR(64) NOT NULL DEFAULT '123456' COMMENT '密码',
     `avatar_url` VARCHAR(255) DEFAULT '' COMMENT '头像URL',
     `register_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '注册时间',
     `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除: 0-否, 1-是',
@@ -195,8 +194,10 @@ CREATE TABLE `conversation_session` (
     `session_id` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '会话ID',
     `user_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '用户ID',
     `dialogue_history` TEXT COMMENT '对话历史JSON',
+    `summary` TEXT COMMENT '对话摘要（LLM生成）',
     `extracted_info` TEXT COMMENT '提取的信息JSON',
     `status` TINYINT DEFAULT 1 COMMENT '状态: 0-结束, 1-进行中',
+    `round_intents` TEXT COMMENT '每轮意图+实体JSON数组，最近10轮。[{"round":0,"intent":"recommend","entities":{}}]',
     `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除',
     `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -204,6 +205,29 @@ CREATE TABLE `conversation_session` (
     INDEX `idx_user_id` (`user_id`),
     INDEX `idx_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='对话会话表';
+
+-- ----------------------------
+-- AI回复反馈表
+-- ----------------------------
+DROP TABLE IF EXISTS `chat_feedback`;
+CREATE TABLE `chat_feedback` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    `user_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '用户ID',
+    `session_id` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '会话ID',
+    `message_index` INT DEFAULT 0 COMMENT '消息索引位置',
+    `user_message` TEXT COMMENT '用户消息',
+    `ai_message` TEXT COMMENT 'AI回复内容',
+    `rating` TINYINT DEFAULT 0 COMMENT '评分: 1-赞, -1-踩, 0-未评价',
+    `feedback_reason` VARCHAR(200) DEFAULT '' COMMENT '反馈原因标签，多选用逗号分隔',
+    `feedback_comment` TEXT COMMENT '用户自由填写的反馈内容',
+    `feedback_time` DATETIME DEFAULT NULL COMMENT '反馈时间',
+    `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除',
+    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX `idx_user_id` (`user_id`),
+    INDEX `idx_session_id` (`session_id`),
+    INDEX `idx_rating` (`rating`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI回复反馈表';
 
 -- ----------------------------
 -- 对话画像更新记录表
@@ -223,5 +247,80 @@ CREATE TABLE `conversation_profile_update` (
     INDEX `idx_session_id` (`session_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='对话画像更新记录表';
 
+-- ----------------------------
+-- 购物车表
+-- ----------------------------
+DROP TABLE IF EXISTS `shopping_cart`;
+CREATE TABLE `shopping_cart` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    `user_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '用户ID',
+    `product_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '商品ID',
+    `quantity` INT DEFAULT 1 COMMENT '数量',
+    `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除: 0-否, 1-是',
+    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY `uk_user_product` (`user_id`, `product_id`),
+    INDEX `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='购物车表';
+
+-- ----------------------------
+-- 用户收藏表
+-- ----------------------------
+DROP TABLE IF EXISTS `user_favorite`;
+CREATE TABLE `user_favorite` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    `user_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '用户ID',
+    `product_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '商品ID',
+    `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除: 0-否, 1-是',
+    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY `uk_user_product` (`user_id`, `product_id`),
+    INDEX `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户收藏表';
+
+-- ----------------------------
+-- 会话质量指标表
+-- ----------------------------
+DROP TABLE IF EXISTS `session_quality_metrics`;
+CREATE TABLE `session_quality_metrics` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    `session_id` VARCHAR(64) NOT NULL DEFAULT '' COMMENT '会话ID',
+    `user_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '用户ID',
+    `metric_type` VARCHAR(50) NOT NULL DEFAULT '' COMMENT '指标类型: repeated_question/abrupt_end/transfer_to_human/low_engagement',
+    `metric_value` TEXT COMMENT '指标详情JSON',
+    `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除: 0-否, 1-是',
+    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX `idx_session_id` (`session_id`),
+    INDEX `idx_user_id` (`user_id`),
+    INDEX `idx_metric_type` (`metric_type`),
+    INDEX `idx_create_time` (`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='会话质量指标表';
+
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- ----------------------------
+-- Agent质量分析结果表（离线任务产出）
+-- ----------------------------
+DROP TABLE IF EXISTS `agent_quality_analysis`;
+CREATE TABLE `agent_quality_analysis` (
+    `id` BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    `agent_name` VARCHAR(50) NOT NULL DEFAULT '' COMMENT 'Agent名称: recommend/product_query/knowledge_query/compare/chitchat',
+    `analysis_date` DATE NOT NULL COMMENT '分析日期',
+    `total_feedback` INT DEFAULT 0 COMMENT '总反馈数',
+    `like_count` INT DEFAULT 0 COMMENT '点赞数',
+    `dislike_count` INT DEFAULT 0 COMMENT '点踩数',
+    `satisfaction_rate` DECIMAL(5,2) DEFAULT 0.00 COMMENT '满意度(%)',
+    `top_dislike_reasons` TEXT COMMENT '差评原因Top5 JSON',
+    `abrupt_end_count` INT DEFAULT 0 COMMENT '突然结束会话数',
+    `repeated_question_count` INT DEFAULT 0 COMMENT '重复提问次数',
+    `transfer_to_human_count` INT DEFAULT 0 COMMENT '转人工次数',
+    `total_sessions` INT DEFAULT 0 COMMENT '总会话数',
+    `avg_rounds` DECIMAL(5,1) DEFAULT 0.0 COMMENT '平均对话轮数',
+    `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除',
+    `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    UNIQUE KEY `uk_agent_date` (`agent_name`, `analysis_date`),
+    INDEX `idx_analysis_date` (`analysis_date`),
+    INDEX `idx_agent_name` (`agent_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Agent质量分析结果表';
 

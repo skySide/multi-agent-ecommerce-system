@@ -5,6 +5,9 @@ import com.ecommerce.dto.FeedbackRequestDTO;
 import com.ecommerce.entity.ChatFeedback;
 import com.ecommerce.vo.SatisfactionStatsVO;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 /**
  * AI回复反馈服务接口
  */
@@ -32,4 +35,14 @@ public interface ChatFeedbackService extends IService<ChatFeedback> {
      * @return 反馈列表
      */
     SatisfactionStatsVO getUserFeedbackStats(String userId);
+
+    /**
+     * 按时间范围和评分列表查询反馈记录
+     *
+     * @param start   开始时间
+     * @param end     结束时间
+     * @param ratings 评分列表（如 [1, -1]）
+     * @return 反馈记录列表
+     */
+    List<ChatFeedback> listByTimeRangeAndRatings(LocalDateTime start, LocalDateTime end, List<Integer> ratings);
 }

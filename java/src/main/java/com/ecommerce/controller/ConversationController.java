@@ -1,7 +1,7 @@
 package com.ecommerce.controller;
 
 import com.ecommerce.common.Result;
-import com.ecommerce.common.enums.ErrorCode;
+import com.ecommerce.common.enums.ErrorCodeEnum;
 import com.ecommerce.dto.ConversationRequestDTO;
 import com.ecommerce.model.ConversationRequest;
 import com.ecommerce.model.ConversationResponse;
@@ -68,7 +68,7 @@ public class ConversationController {
             return Result.success(response);
         } catch (Exception e) {
             log.error("ConversationController.chat 错误, 用户: {}", dto.getUserId(), e);
-            return Result.error(ErrorCode.CONVERSATION_ERROR, "对话服务异常: " + e.getMessage());
+            return Result.error(ErrorCodeEnum.CONVERSATION_ERROR, "对话服务异常: " + e.getMessage());
         }
     }
 
@@ -120,7 +120,7 @@ public class ConversationController {
                     .success(true)
                     .build());
         }
-        return Result.error(ErrorCode.CONVERSATION_ERROR, "结束会话失败");
+        return Result.error(ErrorCodeEnum.CONVERSATION_ERROR, "结束会话失败");
     }
 
     /**

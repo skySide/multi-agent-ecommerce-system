@@ -1,7 +1,7 @@
 package com.ecommerce.controller;
 
 import com.ecommerce.common.Result;
-import com.ecommerce.common.enums.ErrorCode;
+import com.ecommerce.common.enums.ErrorCodeEnum;
 import com.ecommerce.dto.RecommendationRequestDTO;
 import com.ecommerce.entity.Product;
 import com.ecommerce.model.RecommendationRequest;
@@ -74,7 +74,7 @@ public class RecommendationController {
             return Result.success(vo);
         } catch (Exception e) {
             log.error("RecommendationController.recommend 错误, 用户: {}", dto.getUserId(), e);
-            return Result.error(ErrorCode.RECOMMEND_ERROR, "推荐服务异常: " + e.getMessage());
+            return Result.error(ErrorCodeEnum.RECOMMEND_ERROR, "推荐服务异常: " + e.getMessage());
         }
     }
 

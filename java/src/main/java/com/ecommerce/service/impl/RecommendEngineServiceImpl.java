@@ -1,7 +1,7 @@
 package com.ecommerce.service.impl;
 
 import com.baomidou.mybatisplus.core.toolkit.StringUtils;
-import com.ecommerce.common.enums.ErrorCode;
+import com.ecommerce.common.enums.ErrorCodeEnum;
 import com.ecommerce.dto.RewriteResultDTO;
 import com.ecommerce.entity.Product;
 import com.ecommerce.entity.UserProfile;
@@ -535,7 +535,7 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
                 }
             } catch (Exception e) {
                 log.error("RecommendEngineServiceImpl.doRewriteQuery query改写失败: =context = {}",context, e);
-                throw new BusinessException(ErrorCode.RECOMMEND_ERROR.getCode(), "query改写异常");
+                throw new BusinessException(ErrorCodeEnum.RECOMMEND_ERROR.getCode(), "query改写异常");
             }
         }
     }
