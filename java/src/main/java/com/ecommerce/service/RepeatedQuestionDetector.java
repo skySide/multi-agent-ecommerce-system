@@ -8,6 +8,7 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import java.util.*;
 
@@ -171,12 +172,26 @@ public class RepeatedQuestionDetector {
             allTexts.addAll(recentUserMessages);
             List<List<Float>> embeddings = embeddingService.generateEmbeddings(allTexts);
 
+            if (CollectionUtils.isEmpty(embeddings)) {
+                log.warn("RepeatedQuestionDetector.computeTextSimilarity - embedding生成失败，返回0");
+                return 0.0;
+            }
+
             List<Float> currentEmb = embeddings.get(0);
+            if (currentEmb == null || currentEmb.isEmpty()) {
+                log.warn("RepeatedQuestionDetector.computeTextSimilarity - 当前消息embedding为空，返回0");
+                return 0.0;
+            }
+
             double maxSimilarity = 0.0;
 
             // 步骤4: 逐个计算余弦相似度
             for (int i = 1; i < embeddings.size(); i++) {
-                double sim = cosineSimilarity(currentEmb, embeddings.get(i));
+                List<Float> histEmb = embeddings.get(i);
+                if (histEmb == null || histEmb.isEmpty()) {
+                    continue;
+                }
+                double sim = cosineSimilarity(currentEmb, histEmb);
                 if (sim > maxSimilarity) {
                     maxSimilarity = sim;
                 }

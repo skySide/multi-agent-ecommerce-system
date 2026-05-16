@@ -1,84 +1,74 @@
 package com.ecommerce.service.impl;
 
 import com.ecommerce.service.EmbeddingService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ecommerce.service.VectorSyncService;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.ai.embedding.EmbeddingModel;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /**
  * Embedding 服务实现类
- * 调用 Python 服务生成向量
+ * 基于 Spring AI EmbeddingModel（SiliconFlow BAAI/bge-large-zh-v1.5）生成向量
  */
 @Slf4j
 @Service
 public class EmbeddingServiceImpl implements EmbeddingService {
 
-    private final RestTemplate restTemplate = new RestTemplate();
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    @Resource
+    private EmbeddingModel embeddingModel;
 
-    @Value("${embedding.service.url:http://localhost:8000}")
-    private String embeddingServiceUrl;
+    @Resource
+    private VectorSyncService vectorSyncService;
 
     @Override
     public List<Float> generateEmbedding(String text) {
         try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-
-            String requestBody = objectMapper.writeValueAsString(
-                    Collections.singletonMap("text", text)
-            );
-
-            HttpEntity<String> request = new HttpEntity<>(requestBody, headers);
-
-            ResponseEntity<String> response = restTemplate.postForEntity(
-                    embeddingServiceUrl + "/api/v1/embedding",
-                    request,
-                    String.class
-            );
-
-            JsonNode jsonNode = objectMapper.readTree(response.getBody());
-            return parseEmbedding(jsonNode.get("embedding"));
-
+            float[] vector = embeddingModel.embed(text);
+            if (vector == null || vector.length == 0) {
+                log.warn("EmbeddingServiceImpl.generateEmbedding - 返回空向量, text: {}", text);
+                return null;
+            }
+            List<Float> result = new ArrayList<>(vector.length);
+            for (float v : vector) {
+                result.add(v);
+            }
+            return result;
         } catch (Exception e) {
-            log.error("生成 Embedding 失败: {}", text, e);
+            log.error("EmbeddingServiceImpl.generateEmbedding - 生成失败, text: {}", text, e);
             return null;
         }
     }
 
     @Override
     public List<List<Float>> generateEmbeddings(List<String> texts) {
+        log.info("EmbeddingService.generateEmbeddings begin, texts = {}", texts);
         try {
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-
-            String requestBody = objectMapper.writeValueAsString(
-                    Collections.singletonMap("texts", texts)
-            );
-
-            HttpEntity<String> request = new HttpEntity<>(requestBody, headers);
-
-            ResponseEntity<String> response = restTemplate.postForEntity(
-                    embeddingServiceUrl + "/api/v1/embedding/batch",
-                    request,
-                    String.class
-            );
-
-            JsonNode jsonNode = objectMapper.readTree(response.getBody());
-            return parseEmbeddings(jsonNode.get("embeddings"));
-
+            List<float[]> vectors = embeddingModel.embed(texts);
+            if (vectors == null || vectors.isEmpty()) {
+                log.warn("EmbeddingService.generateEmbeddings - 返回空向量列表");
+                return Collections.emptyList();
+            }
+            List<List<Float>> results = new ArrayList<>(vectors.size());
+            for (float[] vector : vectors) {
+                if (vector == null || vector.length == 0) {
+                    results.add(null);
+                } else {
+                    List<Float> list = new ArrayList<>(vector.length);
+                    for (float v : vector) {
+                        list.add(v);
+                    }
+                    results.add(list);
+                }
+            }
+            log.info("EmbeddingService.generateEmbeddings end, texts.length = {}, results.size = {}", texts.size(), results.size());
+            return results;
         } catch (Exception e) {
-            log.error("批量生成 Embedding 失败", e);
+            log.error("EmbeddingService.generateEmbeddings - 批量生成失败, texts = {}", texts, e);
             return null;
         }
     }
@@ -86,36 +76,10 @@ public class EmbeddingServiceImpl implements EmbeddingService {
     @Override
     public void syncAllProductsToVector() {
         try {
-            restTemplate.postForEntity(
-                    embeddingServiceUrl + "/api/v1/sync/products",
-                    null,
-                    String.class
-            );
-            log.info("触发商品向量同步任务");
+            vectorSyncService.syncAllProducts();
+            log.info("EmbeddingServiceImpl.syncAllProductsToVector - 触发商品向量同步完成");
         } catch (Exception e) {
-            log.error("同步商品向量失败", e);
+            log.error("EmbeddingServiceImpl.syncAllProductsToVector - 同步商品向量失败", e);
         }
-    }
-
-    private List<Float> parseEmbedding(JsonNode node) {
-        if (node == null || !node.isArray()) {
-            return null;
-        }
-        List<Float> embedding = new java.util.ArrayList<>();
-        for (JsonNode n : node) {
-            embedding.add(n.floatValue());
-        }
-        return embedding;
-    }
-
-    private List<List<Float>> parseEmbeddings(JsonNode node) {
-        if (node == null || !node.isArray()) {
-            return null;
-        }
-        List<List<Float>> embeddings = new java.util.ArrayList<>();
-        for (JsonNode n : node) {
-            embeddings.add(parseEmbedding(n));
-        }
-        return embeddings;
     }
 }

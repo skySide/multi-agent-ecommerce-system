@@ -62,10 +62,8 @@ mybatis-plus:
 #        # 显式指定gRPC，兼容Zilliz Serverless
 #        client-type: GRPC
 
-# Embedding 服务配置
-embedding:
-  service:
-    url: http://localhost:8000
+# Embedding 服务：由 Spring AI EmbeddingModel 自动配置（SiliconFlow BAAI/bge-large-zh-v1.5）
+# 无需额外配置 URL，EmbeddingModel 已通过 spring.ai.openai.embedding 注入
 
 server:
   port: 8080
