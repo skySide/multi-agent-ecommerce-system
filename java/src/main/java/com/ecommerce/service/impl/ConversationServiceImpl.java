@@ -79,8 +79,9 @@ public class ConversationServiceImpl implements ConversationService {
             if (gapMinutes > QualityConstants.SESSION_TIMEOUT_MINUTES) {
                 String metricValue = String.format(
                         "{\"gap_minutes\":%d,\"previous_status\":0}", gapMinutes);
+                Integer messageIndex = conversationSessionService.resolveLatestMessageIndex(session);
                 sessionQualityMetricsService.recordMetric(sessionId, userId,
-                        QualityConstants.METRIC_SESSION_RESUMED, metricValue);
+                        QualityConstants.METRIC_SESSION_RESUMED, metricValue, messageIndex);
             }
         }
 

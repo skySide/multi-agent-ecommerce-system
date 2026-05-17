@@ -27,7 +27,7 @@ public class SessionQualityMetricsServiceImpl extends ServiceImpl<SessionQuality
     private SessionQualityMetricsMapper sessionQualityMetricsMapper;
 
     @Override
-    public void recordMetric(String sessionId, String userId, String metricType, String metricValue) {
+    public void recordMetric(String sessionId, String userId, String metricType, String metricValue, Integer messageIndex) {
         // 步骤1: 参数校验
         if (StringUtils.isBlank(sessionId) || StringUtils.isBlank(metricType)) {
             log.warn("SessionQualityMetricsService.recordMetric - 参数不完整, sessionId: {}, metricType: {}",
@@ -42,10 +42,11 @@ public class SessionQualityMetricsServiceImpl extends ServiceImpl<SessionQuality
                     .userId(userId)
                     .metricType(metricType)
                     .metricValue(metricValue)
+                    .messageIndex(messageIndex)
                     .build();
             save(metric);
-            log.info("SessionQualityMetricsService.recordMetric - 质量事件记录成功, sessionId: {}, metricType: {}",
-                    sessionId, metricType);
+            log.info("SessionQualityMetricsService.recordMetric - 质量事件记录成功, sessionId: {}, metricType: {}, messageIndex: {}",
+                    sessionId, metricType, messageIndex);
         } catch (Exception e) {
             log.error("SessionQualityMetricsService.recordMetric - 质量事件记录失败, sessionId: {}, metricType: {}",
                     sessionId, metricType, e);
@@ -53,21 +54,21 @@ public class SessionQualityMetricsServiceImpl extends ServiceImpl<SessionQuality
     }
 
     @Override
-    public void recordRepeatedQuestion(String sessionId, String userId, String metricValueJson) {
+    public void recordRepeatedQuestion(String sessionId, String userId, String metricValueJson, Integer messageIndex) {
         // 步骤1: 记录重复提问事件
-        recordMetric(sessionId, userId, QualityConstants.METRIC_REPEATED_QUESTION, metricValueJson);
+        recordMetric(sessionId, userId, QualityConstants.METRIC_REPEATED_QUESTION, metricValueJson, messageIndex);
     }
 
     @Override
-    public void recordAbruptEnd(String sessionId, String userId, String metricValueJson) {
+    public void recordAbruptEnd(String sessionId, String userId, String metricValueJson, Integer messageIndex) {
         // 步骤1: 记录会话突然结束事件
-        recordMetric(sessionId, userId, QualityConstants.METRIC_ABRUPT_END, metricValueJson);
+        recordMetric(sessionId, userId, QualityConstants.METRIC_ABRUPT_END, metricValueJson, messageIndex);
     }
 
     @Override
-    public void recordTransferToHuman(String sessionId, String userId, String metricValueJson) {
+    public void recordTransferToHuman(String sessionId, String userId, String metricValueJson, Integer messageIndex) {
         // 步骤1: 记录转人工事件
-        recordMetric(sessionId, userId, QualityConstants.METRIC_TRANSFER_TO_HUMAN, metricValueJson);
+        recordMetric(sessionId, userId, QualityConstants.METRIC_TRANSFER_TO_HUMAN, metricValueJson, messageIndex);
     }
 
     @Override

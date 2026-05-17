@@ -259,20 +259,13 @@ public class AgentQualityAnalysisServiceImpl extends ServiceImpl<AgentQualityAna
                                                  Map<String, Integer> abruptEndCounts,
                                                  Map<String, Integer> repeatedQuestionCounts,
                                                  Map<String, Integer> transferToHumanCounts) {
-        Map<String, List<SessionQualityMetrics>> metricsBySession = metrics.stream()
-                .collect(Collectors.groupingBy(SessionQualityMetrics::getSessionId));
-
-        for (Map.Entry<String, List<SessionQualityMetrics>> entry : metricsBySession.entrySet()) {
-            String sid = entry.getKey();
-            ConversationSession session = sessionCache.get(sid);
-            String agent = conversationSessionService.resolveAgent(session);
-
-            for (SessionQualityMetrics m : entry.getValue()) {
-                switch (m.getMetricType()) {
-                    case "abrupt_end" -> abruptEndCounts.merge(agent, 1, Integer::sum);
-                    case "repeated_question" -> repeatedQuestionCounts.merge(agent, 1, Integer::sum);
-                    case "transfer_to_human" -> transferToHumanCounts.merge(agent, 1, Integer::sum);
-                }
+        for (SessionQualityMetrics metric : metrics) {
+            ConversationSession session = sessionCache.get(metric.getSessionId());
+            String agent = conversationSessionService.resolveAgentByMessageIndex(session, metric.getMessageIndex());
+            switch (metric.getMetricType()) {
+                case "abrupt_end" -> abruptEndCounts.merge(agent, 1, Integer::sum);
+                case "repeated_question" -> repeatedQuestionCounts.merge(agent, 1, Integer::sum);
+                case "transfer_to_human" -> transferToHumanCounts.merge(agent, 1, Integer::sum);
             }
         }
     }

@@ -172,14 +172,7 @@ public class MemoryServiceImpl implements MemoryService {
         roundData.put("entities", entities != null ? entities : new HashMap<>());
         roundIntents.add(roundData);
 
-        // 步骤3: 只保留最近 N 轮
-        if (roundIntents.size() > QualityConstants.ROUND_INTENTS_MAX_SIZE) {
-            roundIntents = roundIntents.subList(
-                    roundIntents.size() - QualityConstants.ROUND_INTENTS_MAX_SIZE,
-                    roundIntents.size());
-        }
-
-        // 步骤4: 序列化并保存
+        // 步骤3: 序列化并保存
         try {
             session.setRoundIntents(objectMapper.writeValueAsString(roundIntents));
             session.setUpdateTime(LocalDateTime.now());

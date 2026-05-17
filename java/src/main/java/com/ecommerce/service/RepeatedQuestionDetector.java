@@ -99,8 +99,9 @@ public class RepeatedQuestionDetector {
         if (bestMatch != null && bestSimilarity > QualityConstants.REPEATED_SIMILARITY_THRESHOLD) {
             String metricValue = buildMetricValue(currentRound, (int) bestMatch.get("round"),
                     currentIntent, currentEntities, bestMatch, bestSimilarity);
+            int messageIndex = currentRound * 2 + 1;
             sessionQualityMetricsService.recordRepeatedQuestion(
-                    session.getSessionId(), session.getUserId(), metricValue);
+                    session.getSessionId(), session.getUserId(), metricValue, messageIndex);
             log.info("RepeatedQuestionDetector.detect - 检测到重复提问, sessionId: {}, currentRound: {}, similarRound: {}, similarity: {}",
                     session.getSessionId(), currentRound, bestMatch.get("round"), bestSimilarity);
         }
@@ -110,7 +111,9 @@ public class RepeatedQuestionDetector {
      * 判断两个实体 Map 的关键字段是否有交集
      */
     private boolean entitiesOverlap(Map<String, Object> entities1, Map<String, Object> entities2) {
-        if (entities1 == null || entities1.isEmpty() || entities2 == null || entities2.isEmpty()) {
+        if (CollectionUtils.isEmpty(entities1) && CollectionUtils.isEmpty(entities2)) {
+            return true;
+        } else if (CollectionUtils.isEmpty(entities1) || CollectionUtils.isEmpty(entities2)) {
             return false;
         }
 

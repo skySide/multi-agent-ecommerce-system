@@ -288,6 +288,7 @@ CREATE TABLE `session_quality_metrics` (
     `user_id` VARCHAR(32) NOT NULL DEFAULT '' COMMENT '用户ID',
     `metric_type` VARCHAR(50) NOT NULL DEFAULT '' COMMENT '指标类型: repeated_question/abrupt_end/transfer_to_human/low_engagement',
     `metric_value` TEXT COMMENT '指标详情JSON',
+    `message_index` INT DEFAULT NULL COMMENT '消息索引位置，关联chat_feedback.message_index，用于定位问题轮次',
     `is_deleted` TINYINT DEFAULT 0 COMMENT '是否删除: 0-否, 1-是',
     `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',

@@ -28,5 +28,12 @@ public class AgentConstants {
 
     /** 分析用的Agent名称列表（去重后，transfer_to_human归入chitchat） */
     public static final List<String> ANALYSIS_AGENT_NAMES = INTENT_AGENT_MAPPING.values().stream()
+            .map(item -> {
+                int index = item.indexOf("_intent");
+                if (index != -1) {
+                    return item.substring(0, index);
+                }
+                return item;
+            })
             .collect(Collectors.toList());
 }

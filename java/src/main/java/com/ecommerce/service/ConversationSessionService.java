@@ -72,4 +72,13 @@ public interface ConversationSessionService extends IService<ConversationSession
      * @return Agent名称
      */
     String resolveAgent(ConversationSession session);
+
+    /**
+     * 根据会话推算最新轮次对应的 message_index
+     * 从 round_intents 中取最大 round，按公式 messageIndex = round * 2 + 1 计算
+     *
+     * @param session 会话记录
+     * @return 最新轮次对应的 messageIndex，解析失败返回 null
+     */
+    Integer resolveLatestMessageIndex(ConversationSession session);
 }

@@ -187,4 +187,29 @@ public class ConversationSessionServiceImpl extends ServiceImpl<ConversationSess
         // 步骤1: 取最后一轮的意图，委托 resolveAgentByMessageIndex
         return resolveAgentByMessageIndex(session, null);
     }
+
+    @Override
+    public Integer resolveLatestMessageIndex(ConversationSession session) {
+        // 步骤1: 校验参数
+        if (session == null || session.getRoundIntents() == null || session.getRoundIntents().isEmpty()) {
+            return null;
+        }
+
+        try {
+            // 步骤2: 解析 round_intents JSON，找最大 round
+            List<Map<String, Object>> roundIntents = objectMapper.readValue(
+                    session.getRoundIntents(), new TypeReference<>() {}
+            );
+            if (roundIntents.isEmpty()) {
+                return null;
+            }
+
+            // 步骤3: messageIndex = (最新round) * 2 + 1，即 size * 2 - 1
+            return roundIntents.size() * 2 - 1;
+        } catch (Exception e) {
+            log.warn("ConversationSessionService.resolveLatestMessageIndex - 解析失败, sessionId: {}",
+                    session.getSessionId(), e);
+            return null;
+        }
+    }
 }

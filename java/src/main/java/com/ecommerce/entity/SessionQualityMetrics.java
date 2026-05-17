@@ -37,6 +37,9 @@ public class SessionQualityMetrics implements Serializable {
     /** 指标详情JSON */
     private String metricValue;
 
+    /** 消息索引位置，关联chat_feedback.message_index，用于定位问题轮次 */
+    private Integer messageIndex;
+
     @TableLogic
     @TableField(fill = FieldFill.INSERT)
     private Integer isDeleted;

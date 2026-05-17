@@ -1,5 +1,6 @@
 package com.ecommerce.agent;
 
+import com.ecommerce.entity.ConversationSession;
 import com.ecommerce.model.AgentResult;
 import com.ecommerce.model.response.IntentRecognitionResult;
 import com.ecommerce.service.ConversationSessionService;
@@ -7,6 +8,8 @@ import com.ecommerce.service.MemoryService;
 import com.ecommerce.service.RepeatedQuestionDetector;
 import com.ecommerce.service.SessionQualityMetricsService;
 import com.ecommerce.service.UserBehaviorService;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.client.ChatClient;
@@ -55,6 +58,8 @@ public class ConversationAgent extends BaseAgent {
     private List<BaseAgent> intentAgents;
 
     private final Map<String, BaseAgent> intentRouter = new LinkedHashMap<>();
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** 正在执行的 CompletableFuture，key 为 sessionId，用于停止生成 */
     private final Map<String, CompletableFuture<AgentResult>> runningFutures = new ConcurrentHashMap<>();
@@ -132,8 +137,8 @@ public class ConversationAgent extends BaseAgent {
 
         log.info("ConversationAgent.execute - 开始处理, userId: {}, sessionId: {}, message: {}", userId, sessionId, message);
 
-        // 步骤2: 计算当前轮次
-        int currentRound = countUserMessages(history);
+        // 步骤2: 计算当前轮次（基于 round_intents 而非滑动窗口的 history，确保长会话中轮次准确）
+        int currentRound = getCurrentRound(sessionId);
 
         // 步骤3: 意图识别
         IntentRecognitionResult intentResult = recognizeIntent(message, history, summary);
@@ -168,10 +173,24 @@ public class ConversationAgent extends BaseAgent {
     }
 
     /**
-     * 统计历史消息中用户消息的数量
+     * 获取当前轮次（基于 round_intents，而非滑动窗口的 history）
+     * round_intents 是累积的，每轮递增，长会话中不会被截断
      */
-    private int countUserMessages(List<String> history) {
-        return (int) history.stream().filter(h -> h.startsWith("用户: ")).count();
+    private int getCurrentRound(String sessionId) {
+        ConversationSession session = conversationSessionService.getBySessionId(sessionId);
+        if (session == null || session.getRoundIntents() == null) {
+            return 0;
+        }
+        // round_intents 存储已完成的轮次，其 size 即为下一个轮次的序号
+        // 例：[] → currentRound=0, [round0] → currentRound=1, [round0,round1] → currentRound=2
+        try {
+            List<Map<String, Object>> roundIntents = objectMapper.readValue(
+                    session.getRoundIntents(), new TypeReference<>() {});
+            return roundIntents.size();
+        } catch (Exception e) {
+            log.warn("ConversationAgent.getCurrentRound - 解析 round_intents 失败", e);
+            return 0;
+        }
     }
 
     /**
@@ -271,7 +290,7 @@ public class ConversationAgent extends BaseAgent {
     private void checkTransferToHuman(String intent, String sessionId, String userId, int currentRound) {
         if ("transfer_to_human".equals(intent)) {
             String metricValue = "{\"trigger\":\"user_request\",\"round\":" + currentRound + "}";
-            sessionQualityMetricsService.recordTransferToHuman(sessionId, userId, metricValue);
+            sessionQualityMetricsService.recordTransferToHuman(sessionId, userId, metricValue, currentRound);
         }
     }
 

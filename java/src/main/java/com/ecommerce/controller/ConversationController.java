@@ -6,7 +6,9 @@ import com.ecommerce.dto.ConversationRequestDTO;
 import com.ecommerce.model.ConversationRequest;
 import com.ecommerce.model.ConversationResponse;
 import com.ecommerce.service.ConversationService;
+import com.ecommerce.service.ConversationSessionService;
 import com.ecommerce.service.SessionQualityMetricsService;
+import com.ecommerce.entity.ConversationSession;
 import com.ecommerce.vo.SessionCreateVO;
 import com.ecommerce.vo.SessionEndVO;
 import com.ecommerce.vo.SessionSummaryVO;
@@ -32,6 +34,8 @@ public class ConversationController {
 
     @Resource
     private ConversationService conversationService;
+    @Resource
+    private ConversationSessionService conversationSessionService;
     @Resource
     private SessionQualityMetricsService sessionQualityMetricsService;
     @Resource
@@ -148,8 +152,10 @@ public class ConversationController {
         conversationService.endSession(sessionId);
         // 步骤2: 记录质量事件
         if (userId != null && !userId.isEmpty()) {
+            ConversationSession session = conversationSessionService.getBySessionId(sessionId);
+            Integer messageIndex = conversationSessionService.resolveLatestMessageIndex(session);
             sessionQualityMetricsService.recordAbruptEnd(sessionId, userId,
-                    "{\"source\":\"frontend_unmount\"}");
+                    "{\"source\":\"frontend_unmount\"}", messageIndex);
         }
         return Result.success(SessionEndVO.builder()
                 .sessionId(sessionId)
