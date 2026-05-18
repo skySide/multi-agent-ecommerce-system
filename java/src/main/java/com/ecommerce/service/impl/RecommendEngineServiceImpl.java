@@ -20,6 +20,9 @@ import org.springframework.util.CollectionUtils;
 
 import java.math.BigDecimal;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 /**
@@ -38,6 +41,8 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
     private ChatClient chatClient;
     @Resource
     private QueryRewriteService queryRewriteService;
+    @Resource(name = "recommendRecallExecutor")
+    private Executor recommendRecallExecutor;
 
     /** 召回通道权重 */
     private static final double VECTOR_RECALL_WEIGHT = 0.4;
@@ -75,7 +80,7 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
     public Map<String, List<Product>> multiChannelRecall(UserProfile profile, int numItems, Map<String, Object> context) {
         log.info("RecommendEngineServiceImpl.multiChannelRecall begin, profile = {}, numItems = {}, context = {}",
                 profile, numItems, context);
-        Map<String, List<Product>> result = new HashMap<>();
+        Map<String, List<Product>> result = new ConcurrentHashMap<>();
         int recallNum = numItems * RECALL_FACTOR;
 
         // 从 context 提取改写后的查询信息
@@ -89,51 +94,61 @@ public class RecommendEngineServiceImpl implements RecommendEngineService {
                 queryCategory, queryBrand, queryPriceMin, queryPriceMax);
 
         // 1. 向量召回：使用改写后的 query
-        try {
-            List<Product> vectorProducts = vectorRecall(query, profile, (int) (recallNum * VECTOR_RECALL_WEIGHT));
-            // 向量召回已经使用改写后的 query，无需再过滤
-            result.put("vector", sortForChannel("vector", vectorProducts, profile));
-        } catch (Exception e) {
-            log.error("RecommendEngineService.multiChannelRecall 向量召回失败: profile = {}, context = {}",
-                    profile, context, e);
-            result.put("vector", List.of());
-        }
+        CompletableFuture<Void> vectorFuture = CompletableFuture.runAsync(() -> {
+            try {
+                List<Product> vectorProducts = vectorRecall(query, profile, (int) (recallNum * VECTOR_RECALL_WEIGHT));
+                result.put("vector", sortForChannel("vector", vectorProducts, profile));
+            } catch (Exception e) {
+                log.error("RecommendEngineService.multiChannelRecall 向量召回失败: profile = {}, context = {}",
+                        profile, context, e);
+                result.put("vector", List.of());
+            }
+        }, recommendRecallExecutor);
 
         // 2. 热门召回：结合用户查询条件过滤
-        try {
-            List<Product> hotProducts = hotRecallWithFilters(
-                    (int) (recallNum * HOT_RECALL_WEIGHT),
-                    queryCategory, queryBrand, queryPriceMin, queryPriceMax);
-            result.put("hot", sortForChannel("hot", hotProducts, profile));
-        } catch (Exception e) {
-            log.error("RecommendEngineService.multiChannelRecall 热门召回失败: profile = {}, context = {}",
-                    profile, context, e);
-            result.put("hot", List.of());
-        }
+        CompletableFuture<Void> hotFuture = CompletableFuture.runAsync(() -> {
+            try {
+                List<Product> hotProducts = hotRecallWithFilters(
+                        (int) (recallNum * HOT_RECALL_WEIGHT),
+                        queryCategory, queryBrand, queryPriceMin, queryPriceMax);
+                result.put("hot", sortForChannel("hot", hotProducts, profile));
+            } catch (Exception e) {
+                log.error("RecommendEngineService.multiChannelRecall 热门召回失败: profile = {}, context = {}",
+                        profile, context, e);
+                result.put("hot", List.of());
+            }
+        }, recommendRecallExecutor);
 
         // 3. 新品召回：结合用户查询条件过滤
-        try {
-            List<Product> newProducts = newArrivalRecallWithFilters(
-                    (int) (recallNum * NEW_RECALL_WEIGHT),
-                    queryCategory, queryBrand, queryPriceMin, queryPriceMax);
-            result.put("new", sortForChannel("new", newProducts, profile));
-        } catch (Exception e) {
-            log.warn("RecommendEngineService.multiChannelRecall 新品召回失败: profile = {}, context = {}",
-                    profile, context, e);
-            result.put("new", List.of());
-        }
+        CompletableFuture<Void> newFuture = CompletableFuture.runAsync(() -> {
+            try {
+                List<Product> newProducts = newArrivalRecallWithFilters(
+                        (int) (recallNum * NEW_RECALL_WEIGHT),
+                        queryCategory, queryBrand, queryPriceMin, queryPriceMax);
+                result.put("new", sortForChannel("new", newProducts, profile));
+            } catch (Exception e) {
+                log.warn("RecommendEngineService.multiChannelRecall 新品召回失败: profile = {}, context = {}",
+                        profile, context, e);
+                result.put("new", List.of());
+            }
+        }, recommendRecallExecutor);
 
         // 4. 类目召回：优先使用查询中的类目，否则使用画像偏好
-        try {
-            List<Product> categoryProducts = categoryRecallWithQuery(
-                    profile, (int) (recallNum * CATEGORY_RECALL_WEIGHT),
-                    queryCategory, queryBrand, queryPriceMin, queryPriceMax);
-            result.put("category", sortForChannel("category", categoryProducts, profile));
-        } catch (Exception e) {
-            log.warn("RecommendEngineService.multiChannelRecall 类目召回失败: profile = {}, context = {}",
-                    profile, context, e);
-            result.put("category", List.of());
-        }
+        CompletableFuture<Void> categoryFuture = CompletableFuture.runAsync(() -> {
+            try {
+                List<Product> categoryProducts = categoryRecallWithQuery(
+                        profile, (int) (recallNum * CATEGORY_RECALL_WEIGHT),
+                        queryCategory, queryBrand, queryPriceMin, queryPriceMax);
+                result.put("category", sortForChannel("category", categoryProducts, profile));
+            } catch (Exception e) {
+                log.warn("RecommendEngineService.multiChannelRecall 类目召回失败: profile = {}, context = {}",
+                        profile, context, e);
+                result.put("category", List.of());
+            }
+        }, recommendRecallExecutor);
+
+        // 等待所有召回任务完成
+        CompletableFuture.allOf(vectorFuture, hotFuture, newFuture, categoryFuture).join();
 
         List<Product> merged = mergeByRrf(result, numItems);
         result.put("merged", merged);
