@@ -32,6 +32,10 @@ public class VectorStoreServiceImpl implements VectorStoreService {
             return;
         }
         try {
+            // 写入时打上 data_type 标签，与知识库/用户数据隔离
+            for (Document doc : documents) {
+                doc.getMetadata().put(DATA_TYPE_FIELD, DATA_TYPE_PRODUCT);
+            }
             vectorStore.add(documents);
             log.info("VectorStoreServiceImpl.addProductDocuments 添加 {} 条商品文档到向量库", documents.size());
         } catch (Exception e) {
@@ -46,6 +50,9 @@ public class VectorStoreServiceImpl implements VectorStoreService {
             return;
         }
         try {
+            for (Document doc : documents) {
+                doc.getMetadata().put(DATA_TYPE_FIELD, DATA_TYPE_USER);
+            }
             vectorStore.add(documents);
             log.info("VectorStoreServiceImpl.addUserDocuments 添加 {} 条用户文档到向量库", documents.size());
         } catch (Exception e) {
@@ -64,11 +71,16 @@ public class VectorStoreServiceImpl implements VectorStoreService {
             return new ArrayList<>();
         }
         try {
+            // 仅搜索商品数据，排除知识库和用户数据
+            String filterExpression = DATA_TYPE_FIELD + " == \"" + DATA_TYPE_PRODUCT + "\"";
             SearchRequest request = SearchRequest.builder()
                     .query(query)
                     .topK(topK)
+                    .filterExpression(filterExpression)
                     .build();
-            return vectorStore.similaritySearch(request);
+            List<Document> results = vectorStore.similaritySearch(request);
+            logProductSearchResults(results);
+            return results;
         } catch (Exception e) {
             log.error("VectorStoreServiceImpl.searchSimilarProducts 搜索相似商品失败", e);
             return new ArrayList<>();
@@ -86,13 +98,19 @@ public class VectorStoreServiceImpl implements VectorStoreService {
             return new ArrayList<>();
         }
         try {
-            String filterExpression = buildFilterExpression(filters);
+            String customFilter = buildFilterExpression(filters);
+            String filterExpression = DATA_TYPE_FIELD + " == \"" + DATA_TYPE_PRODUCT + "\"";
+            if (StringUtils.isNotBlank(customFilter)) {
+                filterExpression = filterExpression + " && " + customFilter;
+            }
             SearchRequest request = SearchRequest.builder()
                     .query(query)
                     .topK(topK)
                     .filterExpression(filterExpression)
                     .build();
-            return vectorStore.similaritySearch(request);
+            List<Document> results = vectorStore.similaritySearch(request);
+            logProductSearchResults(results);
+            return results;
         } catch (Exception e) {
             log.error("VectorStoreServiceImpl.searchSimilarProducts 搜索相似商品带过滤失败", e);
             return new ArrayList<>();
@@ -124,6 +142,29 @@ public class VectorStoreServiceImpl implements VectorStoreService {
             log.info("VectorStoreServiceImpl.deleteUserDocuments 删除 {} 条用户文档", userIds.size());
         } catch (Exception e) {
             log.error("VectorStoreServiceImpl.deleteUserDocuments 删除用户文档失败", e);
+        }
+    }
+
+    /**
+     * 打印商品检索结果日志
+     */
+    private void logProductSearchResults(List<Document> results) {
+        if (results.isEmpty()) {
+            log.info("VectorStoreServiceImpl 检索结果: 0条");
+            return;
+        }
+        log.info("VectorStoreServiceImpl 检索结果: 共{}条", results.size());
+        for (int i = 0; i < results.size(); i++) {
+            Document doc = results.get(i);
+            Map<String, Object> meta = doc.getMetadata();
+            String preview = doc.getText().length() > 80 ? doc.getText().substring(0, 80) + "..." : doc.getText();
+            log.info("  [{}] pid={}, name={}, category={}, price={}, text={}",
+                    i + 1,
+                    meta.get("productId"),
+                    meta.get("productName"),
+                    meta.get("categoryName"),
+                    meta.get("price"),
+                    preview);
         }
     }
 

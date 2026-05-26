@@ -7,6 +7,7 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StreamUtils;
@@ -146,49 +147,56 @@ public class SystemBootstrap implements CommandLineRunner {
 
     /**
      * 初始化 RAG 知识库
+     * 从 resources/knowledge/ 目录扫描加载知识文档
+     * 目录名 → knowledge_type（大类），文件名（不含扩展名） → sub_type（子类）
      */
     private void initKnowledgeBase() {
         try {
-            log.info("SystemBootstrap.initKnowledgeBase 开始初始化RAG知识库");
+            log.info("SystemBootstrap.initKnowledgeBase 开始从文件加载RAG知识库");
 
-            documentVectorService.addTextToKnowledgeBase(
-                    "退换货政策：\n" +
-                    "1. 7天无理由退货：自签收之日起7天内，商品未使用、包装完好可申请无理由退货。\n" +
-                    "2. 15天质量问题换货：自签收之日起15天内，如发现商品质量问题可申请换货。\n" +
-                    "3. 退货运费：因商品质量问题退货运费由商家承担；无理由退货运费由消费者承担。\n" +
-                    "4. 特殊商品：生鲜、内衣、定制类商品不支持无理由退货。",
-                    "return_policy"
-            );
+            PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+            org.springframework.core.io.Resource[] resources = resolver.getResources("classpath:knowledge/**/*.txt");
 
-            documentVectorService.addTextToKnowledgeBase(
-                    "配送说明：\n" +
-                    "1. 配送范围：全国配送（港澳台及海外除外）。\n" +
-                    "2. 配送时效：一线城市1-2天，二三线城市2-4天，偏远地区5-7天。\n" +
-                    "3. 运费标准：订单满99元免运费，不满99元收取6元运费。\n" +
-                    "4. 配送方式：支持快递配送、自提点取货、同城配送。",
-                    "shipping_policy"
-            );
+            if (resources.length == 0) {
+                log.warn("SystemBootstrap.initKnowledgeBase knowledge目录下未找到.txt知识文件，跳过初始化");
+                return;
+            }
 
-            documentVectorService.addTextToKnowledgeBase(
-                    "会员权益：\n" +
-                    "1. 普通会员：注册即成为普通会员，享受积分累计、生日优惠券。\n" +
-                    "2. 银牌会员：累计消费满1000元，享受95折优惠、优先发货。\n" +
-                    "3. 金牌会员：累计消费满5000元，享受9折优惠、专属客服、免费退换货。\n" +
-                    "4. 钻石会员：累计消费满20000元，享受85折优惠、专属礼品、新品优先购买权。",
-                    "member_benefits"
-            );
+            int loadedCount = 0;
+            for (org.springframework.core.io.Resource resource : resources) {
+                try {
+                    String path = resource.getURI().toString();
+                    // 从路径中提取: knowledge/{knowledge_type}/{sub_type}.txt
+                    String relativePath = path.substring(path.indexOf("knowledge/"));
+                    String[] parts = relativePath.replace("knowledge/", "").split("/");
+                    if (parts.length < 2) {
+                        log.warn("SystemBootstrap.initKnowledgeBase 跳过路径格式不正确的文件: {}", relativePath);
+                        continue;
+                    }
+                    String knowledgeType = parts[0];           // 目录名 = 大类
+                    String subType = parts[1].replace(".txt", ""); // 文件名 = 子类
 
-            documentVectorService.addTextToKnowledgeBase(
-                    "手机选购指南：\n" +
-                    "1. 处理器：目前主流处理器包括苹果A18系列、高通骁龙8 Gen4、联发科天玑9400。处理器性能决定手机流畅度。\n" +
-                    "2. 屏幕：关注分辨率、刷新率、亮度。2K分辨率+120Hz高刷是旗舰标配。\n" +
-                    "3. 拍照：关注主摄像素、传感器尺寸、光学防抖。目前1英寸大底是顶级配置。\n" +
-                    "4. 续航：关注电池容量和快充功率。5000mAh+100W快充是主流配置。\n" +
-                    "5. 系统：iOS系统流畅稳定，Android系统开放自由，鸿蒙系统分布式体验好。",
-                    "phone_buying_guide"
-            );
+                    String content = StreamUtils.copyToString(
+                            resource.getInputStream(), StandardCharsets.UTF_8);
 
-            log.info("SystemBootstrap.initKnowledgeBase RAG知识库初始化完成");
+                    if (content.trim().isEmpty()) {
+                        log.warn("SystemBootstrap.initKnowledgeBase 跳过空文件: {}", relativePath);
+                        continue;
+                    }
+
+                    String source = knowledgeType + "_" + subType;
+                    documentVectorService.addTextToKnowledgeBase(content, source, knowledgeType, subType);
+                    loadedCount++;
+                    log.info("SystemBootstrap.initKnowledgeBase 已加载: {} ({} chunks, {} chars)",
+                            relativePath,
+                            (content.length() / 500) + 1,
+                            content.length());
+                } catch (Exception e) {
+                    log.error("SystemBootstrap.initKnowledgeBase 加载知识文件失败: {}", resource.getFilename(), e);
+                }
+            }
+
+            log.info("SystemBootstrap.initKnowledgeBase RAG知识库初始化完成，共加载 {} 个知识文件", loadedCount);
         } catch (Exception e) {
             log.error("SystemBootstrap.initKnowledgeBase 初始化知识库失败: {}", e.getMessage());
             log.warn("SystemBootstrap.initKnowledgeBase 向量数据库可能不可用，跳过知识库初始化");

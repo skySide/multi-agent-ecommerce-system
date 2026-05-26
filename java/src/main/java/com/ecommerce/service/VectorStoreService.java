@@ -14,6 +14,13 @@ public interface VectorStoreService {
     // Collection 名称
     String PRODUCT_COLLECTION = "product_vectors";
     String USER_COLLECTION = "user_vectors";
+    String KNOWLEDGE_COLLECTION = "knowledge_vectors";
+
+    // 数据隔离字段
+    String DATA_TYPE_FIELD = "data_type";
+    String DATA_TYPE_PRODUCT = "product";
+    String DATA_TYPE_USER = "user";
+    String DATA_TYPE_KNOWLEDGE = "knowledge";
 
     // 向量维度
     int VECTOR_DIM = 768;

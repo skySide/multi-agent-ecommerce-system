@@ -16,6 +16,13 @@ public interface DocumentVectorService {
     void addTextToKnowledgeBase(String content, String source);
 
     /**
+     * 添加文本内容到知识库（带知识分类标签）
+     * @param knowledgeType 知识大类（after_sales/coupon/logistics/member/payment/product_guide/account）
+     * @param subType 知识子类（return_policy/coupon_refund 等）
+     */
+    void addTextToKnowledgeBase(String content, String source, String knowledgeType, String subType);
+
+    /**
      * 添加文档到知识库（自动分块）
      */
     void addDocumentToKnowledgeBase(String text, String source, String docType);
@@ -31,7 +38,14 @@ public interface DocumentVectorService {
     List<Document> searchKnowledgeBase(String query, int topK);
 
     /**
-     * 删除知识库中的文档
+     * 从知识库搜索相关内容（带知识分类过滤）
+     * @param knowledgeTypes 知识大类列表，为空则不过滤大类
+     * @param subTypes 知识子类列表，为空则不过滤子类
+     */
+    List<Document> searchKnowledgeBase(String query, int topK, List<String> knowledgeTypes, List<String> subTypes);
+
+    /**
+     * 从知识库删除文档
      */
     void removeFromKnowledgeBase(String source);
 }
