@@ -1,5 +1,6 @@
 package com.ecommerce.agent;
 
+import com.ecommerce.dto.CategoryHit;
 import com.ecommerce.dto.ClassifyResultDTO;
 import com.ecommerce.model.AgentResult;
 import com.ecommerce.service.DocumentVectorService;
@@ -131,7 +132,7 @@ public class KnowledgeIntentAgent extends BaseAgent {
      * 分类为空：退化为不过滤检索
      */
     private List<Document> searchWithClassification(String query, ClassifyResultDTO classifyResult) {
-        List<ClassifyResultDTO.CategoryHit> categories = classifyResult.getCategories();
+        List<CategoryHit> categories = classifyResult.getCategories();
         if (categories == null || categories.isEmpty()) {
             log.info("KnowledgeIntentAgent.searchWithClassification 未分类，退化为知识库全量检索");
             return documentVectorService.searchKnowledgeBase(query, 3);
@@ -139,7 +140,7 @@ public class KnowledgeIntentAgent extends BaseAgent {
 
         // 按 knowledge_type 分组，收集各组的 sub_type
         Map<String, List<String>> groupedByType = new LinkedHashMap<>();
-        for (ClassifyResultDTO.CategoryHit hit : categories) {
+        for (CategoryHit hit : categories) {
             groupedByType.computeIfAbsent(hit.getKnowledgeType(), k -> new ArrayList<>())
                     .add(hit.getSubType());
         }

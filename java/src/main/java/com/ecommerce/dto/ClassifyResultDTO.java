@@ -1,5 +1,6 @@
 package com.ecommerce.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -24,22 +25,9 @@ public class ClassifyResultDTO implements Serializable {
     private List<CategoryHit> categories;
 
     /** 是否跨类别（涉及2个及以上大类） */
+    @JsonProperty("is_cross_category")
     private boolean isCrossCategory;
 
     /** 分类置信度 0-1 */
     private Double confidence;
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    public static class CategoryHit implements Serializable {
-        private static final long serialVersionUID = 1L;
-        /** 知识大类 */
-        private String knowledgeType;
-        /** 知识子类 */
-        private String subType;
-        /** 该类别与用户问题的相关度 0-1 */
-        private Double relevance;
-    }
 }

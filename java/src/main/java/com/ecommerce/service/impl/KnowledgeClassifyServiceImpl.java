@@ -1,17 +1,16 @@
 package com.ecommerce.service.impl;
 
+import com.ecommerce.dto.CategoryHit;
 import com.ecommerce.dto.ClassifyResultDTO;
 import com.ecommerce.service.KnowledgeClassifyService;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 知识分类服务实现
@@ -23,8 +22,6 @@ public class KnowledgeClassifyServiceImpl implements KnowledgeClassifyService {
 
     @Resource
     private ChatClient chatClient;
-
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final String CLASSIFY_PROMPT = """
             你是一个电商知识分类专家。请分析用户问题涉及哪些知识类别。
@@ -65,6 +62,7 @@ public class KnowledgeClassifyServiceImpl implements KnowledgeClassifyService {
             %s
 
             ## 输出格式（JSON）
+            ```json
             {
               "categories": [
                 {"knowledge_type": "after_sales", "sub_type": "return_policy", "relevance": 0.9}
@@ -72,6 +70,7 @@ public class KnowledgeClassifyServiceImpl implements KnowledgeClassifyService {
               "is_cross_category": false,
               "confidence": 0.9
             }
+            ```
 
             请只输出 JSON，不要其他解释。
             """;
@@ -81,46 +80,25 @@ public class KnowledgeClassifyServiceImpl implements KnowledgeClassifyService {
         log.info("KnowledgeClassifyServiceImpl.classify 开始分类 query={}", query);
 
         try {
+            // 步骤1: 构建上下文和提示词
             String historyContext = buildHistoryContext(history);
             String prompt = String.format(CLASSIFY_PROMPT, historyContext, query);
-            String response = chatClient.prompt().user(prompt).call().content().trim();
 
-            // 清理 markdown 代码块
-            String json = response;
-            if (json.startsWith("```")) {
-                json = json.substring(json.indexOf('\n') + 1);
-                json = json.substring(0, json.lastIndexOf("```")).trim();
-            }
+            // 步骤2: 调用 LLM 获取 JSON 响应，使用 BeanOutputConverter 自动反序列化为 DTO
+            var converter = new BeanOutputConverter<>(ClassifyResultDTO.class);
+            String response = chatClient.prompt().user(prompt).call().content();
+            ClassifyResultDTO result = converter.convert(response);
 
-            Map<String, Object> resultMap = objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
-
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> categoriesRaw = (List<Map<String, Object>>) resultMap.get("categories");
-            boolean isCrossCategory = (boolean) resultMap.getOrDefault("is_cross_category", false);
-            double confidence = resultMap.get("confidence") instanceof Number
-                    ? ((Number) resultMap.get("confidence")).doubleValue() : 0.8;
-
-            List<ClassifyResultDTO.CategoryHit> categories = categoriesRaw.stream()
-                    .map(c -> ClassifyResultDTO.CategoryHit.builder()
-                            .knowledgeType((String) c.get("knowledge_type"))
-                            .subType((String) c.get("sub_type"))
-                            .relevance(c.get("relevance") instanceof Number
-                                    ? ((Number) c.get("relevance")).doubleValue() : 0.5)
-                            .build())
-                    .toList();
-
-            ClassifyResultDTO result = ClassifyResultDTO.builder()
-                    .categories(categories)
-                    .isCrossCategory(isCrossCategory)
-                    .confidence(confidence)
-                    .build();
-
+            // 步骤3: 记录分类结果
             log.info("KnowledgeClassifyServiceImpl.classify 分类结果: categories={}, isCross={}",
-                    categories.stream().map(ClassifyResultDTO.CategoryHit::getKnowledgeType).toList(), isCrossCategory);
+                    result.getCategories() != null
+                            ? result.getCategories().stream().map(CategoryHit::getKnowledgeType).toList()
+                            : Collections.emptyList(),
+                    result.isCrossCategory());
             return result;
 
         } catch (Exception e) {
-            log.warn("KnowledgeClassifyServiceImpl.classify 分类失败: {}", e.getMessage());
+            log.error("KnowledgeClassifyServiceImpl.classify 分类失败: {}", e.getMessage());
             // 降级：返回空分类结果，由调用方退化为不过滤检索
             return ClassifyResultDTO.builder()
                     .categories(Collections.emptyList())
