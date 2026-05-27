@@ -1,3 +1,8 @@
+---
+name: java-code-standards
+description: Java 代码规范检查，涵盖日志、异常、DTO、Controller、线程池、事务等编码规范
+---
+
 # Java 代码规范 Skill
 
 ## 概述
@@ -1055,6 +1060,157 @@ public enum OrderStatus {
 
 ---
 
+## 17. Spring AI 结构化输出规范（entity() 方法）
+
+### 17.1 必须使用 entity() 而非手动解析 JSON
+
+当 LLM 的响应需要映射为 Java 实体时，**必须**使用 Spring AI 的 `entity()` 方法，禁止通过 `content()` 获取原始字符串后手动解析 JSON。
+
+```java
+// 正确示例 - 使用 entity() 直接映射
+@Component
+public class KnowledgeClassifyServiceImpl implements KnowledgeClassifyService {
+
+    @Resource
+    private ChatClient chatClient;
+
+    @Override
+    public ClassifyResultDTO classify(String query, List<String> history) {
+        // 步骤1: 构建提示词
+        String prompt = buildPrompt(query, history);
+
+        // 步骤2: 调用 LLM，使用 entity() 直接将 JSON 反序列化为 DTO
+        ClassifyResultDTO result = chatClient.prompt().user(prompt).call().entity(ClassifyResultDTO.class);
+
+        return result;
+    }
+}
+
+// 错误示例 - 使用 content() 手动解析 JSON
+@Component
+public class KnowledgeClassifyServiceImpl implements KnowledgeClassifyService {
+
+    @Resource
+    private ChatClient chatClient;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Override
+    public ClassifyResultDTO classify(String query, List<String> history) {
+        String prompt = buildPrompt(query, history);
+
+        // 错误：手动获取字符串再解析
+        String response = chatClient.prompt().user(prompt).call().content().trim();
+
+        // 错误：手动清理 markdown 代码块
+        String json = response;
+        if (json.startsWith("```")) {
+            json = json.substring(json.indexOf('\n') + 1);
+            json = json.substring(0, json.lastIndexOf("```")).trim();
+        }
+
+        // 错误：手动逐字段提取和类型转换
+        Map<String, Object> resultMap = objectMapper.readValue(json, new TypeReference<>() {});
+        List<Map<String, Object>> categoriesRaw = (List<Map<String, Object>>) resultMap.get("categories");
+        // ...大量手工映射代码
+    }
+}
+```
+
+### 17.2 entity() vs content() 选择标准
+
+| 场景 | 使用方法 | 说明 |
+|------|---------|------|
+| LLM 输出结构化 JSON → 映射为 POJO | `entity(Class.class)` | 推荐，类型安全 |
+| LLM 输出泛型集合（如 `List<String>`） | `entity(new ParameterizedTypeReference<>() {})` | 泛型场景 |
+| LLM 输出纯文本（闲聊回复、摘要） | `content()` | 无需结构化时可用 |
+| LLM 输出简单字符串（Query改写单值） | `content()` | 单值输出 |
+
+```java
+// 场景1: 结构化 JSON → POJO
+RewriteResultDTO result = chatClient.prompt().user(prompt).call().entity(RewriteResultDTO.class);
+
+// 场景2: 泛型集合
+List<String> keywords = chatClient.prompt().user(prompt).call()
+        .entity(new ParameterizedTypeReference<List<String>>() {});
+
+// 场景3: 纯文本回复
+String reply = chatClient.prompt().user(prompt).call().content();
+```
+
+### 17.3 DTO 字段映射规范
+
+当 LLM Prompt 中的 JSON 字段名为 snake_case 而 Java 字段为 camelCase 时，**必须**在 DTO 中添加 `@JsonProperty` 注解明确映射关系。
+
+```java
+// 正确示例 - 显式 @JsonProperty 映射
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class ClassifyResultDTO implements Serializable {
+
+    private static final long serialVersionUID = 1L;
+
+    /** 命中的知识类别列表 */
+    private List<CategoryHit> categories;
+
+    /** 是否跨类别 */
+    @JsonProperty("is_cross_category")
+    private boolean isCrossCategory;
+
+    /** 分类置信度 */
+    private Double confidence;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class CategoryHit implements Serializable {
+        private static final long serialVersionUID = 1L;
+
+        /** 知识大类 */
+        @JsonProperty("knowledge_type")
+        private String knowledgeType;
+
+        /** 知识子类 */
+        @JsonProperty("sub_type")
+        private String subType;
+
+        /** 相关度 */
+        private Double relevance;
+    }
+}
+```
+
+### 17.4 entity() 异常处理
+
+`entity()` 方法在 JSON 解析失败时会抛出异常，调用方**必须**捕获并做降级处理。
+
+```java
+try {
+    ClassifyResultDTO result = chatClient.prompt().user(prompt).call().entity(ClassifyResultDTO.class);
+    return result;
+} catch (Exception e) {
+    log.warn("LLM 结构化输出解析失败: {}", e.getMessage());
+    // 降级：返回默认值或空结果
+    return ClassifyResultDTO.builder()
+            .categories(Collections.emptyList())
+            .isCrossCategory(false)
+            .confidence(0.0)
+            .build();
+}
+```
+
+### 17.5 禁止事项
+
+- **禁止**使用 `content()` 获取 LLM 输出后手动调用 `ObjectMapper.readValue()` 解析
+- **禁止**手动清理 Markdown 代码块（\`\`\`json ... \`\`\`），Spring AI 的 `entity()` 自动处理
+- **禁止**在 Service 类中创建 `ObjectMapper` 实例用于 LLM 响应解析
+- **禁止**使用 `Map.class` 或 `TypeReference<Map<String, Object>>` 作为 `entity()` 的参数（应定义具体 DTO）
+
+---
+
 ## 快速检查清单（更新版）
 
 在代码审查时，请检查以下项目：
@@ -1081,3 +1237,6 @@ public enum OrderStatus {
 - [ ] **方法内每个步骤是否有行注释说明**
 - [ ] **类是否有 JavaDoc 文档注释**
 - [ ] **是否使用常量类或枚举替代硬编码**
+- [ ] **LLM 结构化输出是否使用 entity() 而非手动 JSON 解析**
+- [ ] **DTO 是否添加 @JsonProperty 映射 snake_case JSON 字段**
+- [ ] **entity() 调用是否有 try-catch 降级处理**

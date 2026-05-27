@@ -750,6 +750,210 @@ app = graph.compile(checkpointer=SqliteSaver(...))
 4. **配置管理**：application.yml统一管理LLM配置（base-url、api-key、model、temperature），支持多环境profile
 5. **Tool集成**：@Tool注解将现有Service方法直接暴露给LLM，无需额外适配层
 
+### 5.5 LangGraph 核心技术概念深度解析
+
+面试中若被问到"你了解LangGraph吗"，以下知识点必须掌握。
+
+#### 5.5.1 StateGraph —— LangGraph的核心抽象
+
+`StateGraph`是LangGraph最核心的概念，它是一个**有状态的有向图**。与LangChain的`Chain`（无状态线性管道）不同，StateGraph在每个节点执行后都会更新一个共享的`State`对象。
+
+```python
+from langgraph.graph import StateGraph
+from typing import TypedDict, Annotated
+from operator import add
+
+# 1. 定义State —— 图中所有节点共享的数据结构
+class AgentState(TypedDict):
+    messages: Annotated[list, add]  # add = 追加而非覆盖
+    user_id: str
+    current_intent: str
+    tool_results: dict
+
+# 2. 定义节点 —— 接收State，返回State的部分更新
+def intent_classifier(state: AgentState) -> dict:
+    intent = llm.classify(state["messages"][-1])
+    return {"current_intent": intent}  # 只返回需要更新的字段
+
+def tool_executor(state: AgentState) -> dict:
+    result = execute_tool(state["current_intent"])
+    return {"tool_results": result}
+
+# 3. 构建图
+graph = StateGraph(AgentState)
+graph.add_node("classifier", intent_classifier)
+graph.add_node("executor", tool_executor)
+graph.add_node("responder", generate_response)
+
+# 4. 边 + 条件路由
+graph.set_entry_point("classifier")
+graph.add_conditional_edges(
+    "classifier",
+    router,                          # 路由函数
+    {"recommend": "executor", "chitchat": "responder"}  # 路由表
+)
+graph.add_edge("executor", "responder")
+graph.add_edge("responder", END)
+
+# 5. 编译（可选checkpointer实现持久化）
+app = graph.compile(checkpointer=MemorySaver())
+```
+
+**与 Spring AI 的对应关系**：
+
+| LangGraph 概念 | 本项目 Spring AI 实现 |
+|---------------|---------------------|
+| StateGraph | SupervisorOrchestrator 的 `Map<String, AgentResult>` |
+| Node | 每个 BaseAgent 子类的 `execute()` 方法 |
+| Edge | Supervisor 中 `agentA.join()` → `agentB.join()` 的调用顺序 |
+| Conditional Edge | ConversationAgent 的 `intentRouter` (LinkedHashMap) |
+| Checkpointer | MySQL `conversation_session` 表 + Redis 缓存 |
+| State update (add reducer) | `mergeSubAgentEntities()` 合并式更新 |
+
+#### 5.5.2 条件边（Conditional Edges）—— 实现动态路由
+
+这是LangGraph中最强大的特性之一，允许根据当前State动态决定下一个节点。
+
+```python
+def router(state: AgentState) -> str:
+    """根据意图动态路由"""
+    intent = state["current_intent"]
+    if intent == "recommend":
+        return "executor"       # 需要工具调用
+    elif intent == "transfer_to_human":
+        return "human_handoff"  # 转人工节点
+    else:
+        return "responder"      # 直接回复
+
+# 条件边：从一个节点出发，根据router返回值选择下一个节点
+graph.add_conditional_edges(
+    "classifier",
+    router,
+    {
+        "executor": "executor",
+        "responder": "responder",
+        "human_handoff": "human_handoff"
+    }
+)
+```
+
+**本项目对应实现**：ConversationAgent 的意图路由表本质上就是一种条件边模式。
+
+```java
+// 本项目等价实现
+BaseAgent subAgent = intentRouter.get(intent);  // 条件路由
+AgentResult result = subAgent.runAsync(params).join();
+```
+
+#### 5.5.3 Checkpointer —— 状态持久化与断点续传
+
+LangGraph的Checkpointer机制实现对话中断后恢复、时间旅行调试等能力。
+
+```python
+from langgraph.checkpoint.sqlite import SqliteSaver
+
+# 编译时注入checkpointer
+app = graph.compile(checkpointer=SqliteSaver.from_conn_string("checkpoints.db"))
+
+# 每次调用传入 thread_id，自动加载/保存状态
+config = {"configurable": {"thread_id": "user-session-123"}}
+result = app.invoke({"messages": ["推荐手机"]}, config)
+# State自动持久化到SQLite
+
+# 下次同thread_id调用，自动恢复之前的状态
+result2 = app.invoke({"messages": ["华为的"]}, config)
+# State中包含之前累积的信息，实现跨轮次记忆
+```
+
+**本项目对应实现**：三层记忆系统天然实现了Checkpointer的功能。
+
+```java
+// 项目等价实现
+// thread_id → sessionId
+// State → dialogue_history + extracted_info + summary
+// 每次请求时:
+String sessionId = params.get("sessionId");
+Session session = memoryService.getSession(sessionId);   // 加载状态
+// ... Agent执行 ...
+memoryService.saveHistory(sessionId, newMessages);        // 持久化状态
+```
+
+#### 5.5.4 Send API —— 并行节点执行
+
+LangGraph的`Send` API允许一个节点fan-out到多个并行执行的目标节点。
+
+```python
+from langgraph.graph import Send
+
+def continue_to_tools(state):
+    """一个节点fan-out到多个工具并行执行"""
+    return [
+        Send("product_search", {"query": "手机"}),
+        Send("inventory_check", {"product_ids": ["P001"]}),
+        Send("profile_analysis", {"user_id": state["user_id"]}),
+    ]
+
+graph.add_conditional_edges("orchestrator", continue_to_tools, [...])
+# 三个工具节点并行执行，结果自动reduce合并到State
+```
+
+**本项目对应实现**：当前是串行调用，但设计上支持并行。
+
+```java
+// 当前（串行）
+AgentResult r1 = agentA.runAsync(p1).join();
+AgentResult r2 = agentB.runAsync(p2).join();
+
+// 可改造为并行（LangGraph Send API 的等价实现）
+CompletableFuture<AgentResult> f1 = agentA.runAsync(p1);
+CompletableFuture<AgentResult> f2 = agentB.runAsync(p2);
+CompletableFuture.allOf(f1, f2).join();
+AgentResult r1 = f1.join();
+AgentResult r2 = f2.join();
+```
+
+#### 5.5.5 Human-in-the-Loop —— 人机协作
+
+LangGraph支持在图中设置中断点（interrupt），等待人工审批后继续。
+
+```python
+# 在关键节点前设置中断
+graph.add_node("approval", human_approval_node)
+
+# 编译时指定中断点
+app = graph.compile(checkpointer=MemorySaver(), interrupt_before=["approval"])
+
+# 执行到approval前自动暂停
+result = app.invoke(input_data, config)  # 返回当前State，暂停
+# 人工审核后，传入None继续
+app.invoke(None, config)  # 从中断点继续执行
+```
+
+**本项目对应实现**：ConversationAgent的`transfer_to_human`意图本质上就是一种Human-in-the-Loop机制。
+
+#### 5.5.6 面试常见追问
+
+**Q: LangGraph和Spring AI能互补使用吗？**
+
+> 完全可以。推荐架构：LangGraph做Agent编排层（状态图、动态路由、人机协作），Spring AI做工具集成层（@Tool注解调用后端服务）。两者通过HTTP/gRPC通信。这种混合架构可以兼顾LangGraph在Agent编排上的灵活性和Spring在企业级集成上的优势。
+
+**Q: LangGraph的State和本项目AgentResult的data Map有什么区别？**
+
+| 维度 | LangGraph State | 项目 AgentResult.data |
+|------|----------------|----------------------|
+| 类型安全 | TypedDict提供运行时类型校验 | Map<String, Object>无类型约束 |
+| 更新策略 | reducer控制（覆盖/追加/合并） | 编排器手动merge |
+| 持久化 | Checkpointer自动 | 手动调用memoryService |
+| 跨节点可见 | 所有节点共享同一State | 通过编排器参数传递 |
+
+**Q: 本项目迁移到LangGraph需要改什么？**
+
+1. 每个BaseAgent子类 → 改为LangGraph的Node函数
+2. SupervisorOrchestrator的串行调用 → 改为StateGraph的边定义
+3. ConversationAgent的intentRouter → 改为ConditionalEdge
+4. MemoryService的三层记忆 → 改为Checkpointer + State
+5. 保留：Tool的@Tool注解（或改用Python的@tool装饰器）、Service层业务逻辑
+
 ---
 
 ## 六、数据闭环与模型调优策略
@@ -886,54 +1090,195 @@ A/B验证: Prompt层实验组 vs 原有Prompt → 观察 inaccurate 差评率是
 A/B验证: 模型层实验组 vs 当前模型 → 对比满意度 + Token成本
 ```
 
-#### 6.4.3 微调（Fine-tuning）策略（高阶）
+#### 6.4.3 模型微调深度解析（LoRA / QLoRA / SFT / DPO）
 
-当Prompt优化和模型选择无法满足需求时，考虑微调。本项目的质量数据结构天然支持微调数据集的构建。
+当Prompt优化和模型选择无法满足需求时，考虑微调。本项目的质量数据结构天然支持微调数据集的构建。以下为面试中必须掌握的微调核心知识。
+
+##### 6.4.3.1 为什么需要参数高效微调（PEFT）？
+
+全量微调（Full Fine-Tuning）需要更新模型全部参数（如DeepSeek-V3的671B参数），显存需求巨大（>1000GB），个人和小团队无法承受。PEFT技术通过只训练少量参数达到接近全量微调的效果。
+
+| 方法 | 训练参数量 | 显存需求 (7B模型) | 训练速度 | 效果 |
+|------|-----------|------------------|---------|------|
+| Full Fine-Tuning | 100%（7B） | ~56GB (FP32) | 慢 | 最佳 |
+| **LoRA** | 0.1%-1%（~几M） | ~14GB (FP16) | 快（2-3x） | 接近全量 |
+| **QLoRA** | 0.1%-1% | ~6GB (4-bit) | 中等 | 接近LoRA |
+| Adapter | 2%-5% | ~18GB | 中等 | 略低于LoRA |
+| Prefix Tuning | <1% | ~16GB | 快 | 略低于LoRA |
+
+##### 6.4.3.2 LoRA（Low-Rank Adaptation）核心原理
+
+**核心思想**：预训练大模型在适配下游任务时，权重更新矩阵 ΔW 是**低秩**的。因此可以用两个小矩阵 A 和 B 的乘积来近似 ΔW。
 
 ```
-微调数据集构建流程:
-    │
-    ├── 正样本构造:
-    │   来源: chat_feedback 中 rating=1（点赞）的会话
-    │   提取: 用户消息 + 对话历史 → LLM的原始输出
-    │   标签: "好的回复"（用户认可的回答模式）
-    │
-    ├── 负样本构造:
-    │   来源: chat_feedback 中 rating=-1 的会话
-    │         + repeated_question 对应的对话轮次
-    │         + transfer_to_human 前的对话轮次
-    │   标签: "差的回复"（用户不满意的回答模式）
-    │   用途: DPO（Direct Preference Optimization）训练
-    │         让模型学会避免用户不满意的回答模式
-    │
-    └── 微调策略选择:
-    
-    ┌──────────────────────────────────────────────────────┐
-    │ 策略1: SFT（Supervised Fine-Tuning）全量微调            │
-    │   适用: 需要模型学习全新的回答风格或领域知识              │
-    │   成本: 高（需要GPU资源，>1000条高质量样本）            │
-    │   示例: 让模型学会电商合规文案的特定写法                  │
-    │                                                       │
-    │ 策略2: LoRA（Low-Rank Adaptation）轻量微调              │
-    │   适用: 在基座模型上调整特定行为                         │
-    │   成本: 中（显存需求低，>500条样本即可）                │
-    │   示例: 调整意图识别准确率、实体提取精度                  │
-    │                                                       │
-    │ 策略3: DPO（Direct Preference Optimization）偏好对齐  │
-    │   适用: 已有明确的"好/坏"回答对比数据                    │
-    │   成本: 中（不需要 reward model）                      │
-    │   示例: 基于点赞/点踩数据直接优化回答偏好                 │
-    │                                                       │
-    │ 策略4: RAG+Prompt优化（非微调方案，优先尝试）             │
-    │   适用: 问题是"知识不足"而非"能力不足"                   │
-    │   成本: 低（更新知识库文档即可）                         │
-    │   示例: 更新退换货政策知识库文档                          │
-    └──────────────────────────────────────────────────────┘
+原始前向传播: h = W · x
+LoRA前向传播: h = W · x + B · A · x
+                         └─ ΔW ─┘
+
+其中: W ∈ R^(d×k)  (冻结，不训练)
+      B ∈ R^(d×r)  (可训练，随机初始化)
+      A ∈ R^(r×k)  (可训练，高斯初始化)
+      r << min(d, k)  (r=8或16足够)
 ```
 
-**面试话术**：
+**关键参数**：
 
-> "我们系统的质量数据闭环天然支持微调数据集的构建。点赞数据做正样本，点踩+重复提问+转人工做负样本，可以进行DPO偏好对齐训练。但目前优先走轻量路径：先看Prompt能不能修，再看模型要不要换，最后才考虑微调。因为微调成本高，而且基座模型本身在持续进化（如DeepSeek-V3每季度更新），微调模型的维护成本不容忽视。"
+| 参数 | 含义 | 推荐值 | 说明 |
+|------|------|--------|------|
+| **r (rank)** | 低秩矩阵的秩 | 8 / 16 / 32 | 越大表达能力越强，但参数越多。r=8已足够大多数任务 |
+| **alpha** | 缩放因子 | 16 / 32 | LoRA输出的缩放系数，实际缩放 = alpha/r |
+| **target_modules** | 应用LoRA的层 | q_proj, v_proj | 通常只对Attention的Q和V矩阵加LoRA |
+| **dropout** | 正则化 | 0.05 / 0.1 | 防止过拟合 |
+
+```python
+# 使用 PEFT 库实现 LoRA 微调（示例代码）
+from peft import LoraConfig, get_peft_model, TaskType
+from transformers import AutoModelForCausalLM, Trainer
+
+# 1. 加载基座模型
+model = AutoModelForCausalLM.from_pretrained("deepseek-ai/DeepSeek-V3")
+
+# 2. 配置 LoRA
+lora_config = LoraConfig(
+    r=8,                          # 秩
+    lora_alpha=16,                # 缩放因子
+    target_modules=["q_proj", "v_proj"],  # 仅微调Q/V投影
+    lora_dropout=0.05,
+    bias="none",
+    task_type=TaskType.CAUSAL_LM
+)
+
+# 3. 包装模型
+model = get_peft_model(model, lora_config)
+model.print_trainable_parameters()
+# 输出: trainable params: 4,194,304 || all params: 7,004,194,304 || trainable%: 0.06%
+
+# 4. 正常训练
+trainer = Trainer(model=model, train_dataset=dataset, ...)
+trainer.train()
+
+# 5. 保存LoRA权重（仅几MB）
+model.save_pretrained("./lora-adapter")
+```
+
+##### 6.4.3.3 QLoRA —— 在消费级GPU上微调大模型
+
+QLoRA = **Quantization** + LoRA。在LoRA的基础上，将基座模型**量化到4-bit**，显存需求再降低3-4倍，使得在单张RTX 3090（24GB）上微调7B模型成为可能。
+
+**核心技术组合**：
+
+```
+QLoRA = 4-bit NormalFloat (NF4)     ← 新的量化数据类型
+      + Double Quantization         ← 二次量化进一步节省显存
+      + Paged Optimizers            ← 统一内存管理，避免OOM
+      + LoRA                        ← 低秩适配器
+```
+
+```python
+from transformers import BitsAndBytesConfig
+from peft import prepare_model_for_kbit_training
+
+# 1. 4-bit量化配置
+bnb_config = BitsAndBytesConfig(
+    load_in_4bit=True,                    # 4-bit加载基座模型
+    bnb_4bit_quant_type="nf4",           # NormalFloat4量化
+    bnb_4bit_compute_dtype=torch.float16, # 计算时用float16
+    bnb_4bit_use_double_quant=True,       # 二次量化
+)
+
+# 2. 加载量化模型
+model = AutoModelForCausalLM.from_pretrained(
+    "deepseek-ai/DeepSeek-V3",
+    quantization_config=bnb_config,
+    device_map="auto"                     # 自动分配GPU/CPU
+)
+
+# 3. 准备量化训练
+model = prepare_model_for_kbit_training(model)
+
+# 4. 应用LoRA配置（同普通LoRA）
+model = get_peft_model(model, lora_config)
+
+# 显存对比:
+# 全量微调 7B:  ~56GB (需要A100 80G)
+# LoRA 7B:      ~14GB (RTX 3090/4090 可跑)
+# QLoRA 7B:      ~6GB (RTX 3060 12G 可跑)
+```
+
+**面试要点**：QLoRA的作者实验证明，4-bit量化 + LoRA 的效果与全精度LoRA几乎无异，在某些任务上甚至因为量化的正则化效应而略好。
+
+##### 6.4.3.4 本项目微调数据集构建
+
+本项目的质量数据体系天然支持微调数据集的构造：
+
+```
+数据来源 → 数据集构造:
+
+1. 正样本 (SFT训练数据):
+   来源: chat_feedback 中 rating=1（点赞）的会话
+   格式: {"instruction": "用户消息 + 对话历史", "output": "LLM的原始输出"}
+   数量目标: >500条（LoRA最低要求），>1000条（推荐）
+
+2. 偏好对比样本 (DPO训练数据):
+   来源: chat_feedback 中 rating=1 vs rating=-1
+   格式: {"prompt": "用户消息", "chosen": "点赞的回答", "rejected": "点踩的回答"}
+   来源补充: repeated_question 对应轮次 / transfer_to_human 前对话轮次
+   数量目标: >300对
+
+3. 意图识别增强样本:
+   来源: 提取所有带 intent 标注的对话轮次
+   格式: {"text": "用户消息", "label": "recommend/product_query/...", "entities": {...}}
+   用途: 专门微调意图识别能力
+```
+
+##### 6.4.3.5 微调策略选择决策矩阵
+
+```
+问题类型诊断:
+│
+├── "回答格式不对，JSON无法解析"
+│   → 优先: Prompt优化 (Few-shot示例 + JSON Schema)
+│   → 无效: SFT微调（构造"用户消息→正确JSON格式"的数据）
+│   → 原因: 基座模型具备输出JSON的能力，用SFT固化格式
+│
+├── "特定领域知识经常出错（如退换货政策）"
+│   → 优先: 更新RAG知识库文档
+│   → 优先: 优化chunk策略（减小chunk，增加overlap）
+│   → 无效: QLoRA微调（用知识库QA对微调，让模型内化领域知识）
+│   → 原因: 知识型问题应优先走RAG，频繁出错才考虑微调
+│
+├── "回答风格不符合品牌调性（太机械/太随意）"
+│   → 优先: System Prompt调优
+│   → 无效: DPO训练（构造"好风格 vs 坏风格"的对比数据）
+│   → 原因: 风格偏好适合DPO，让模型学会"偏好"而非"知识"
+│
+├── "总是忽略用户预算限制，推昂贵商品"
+│   → SFT微调（构造带约束条件的训练样本）
+│   → 示例: {"instruction": "用户: 预算3000，推荐手机", "output": "考虑预算3000以内..."}
+│
+└── "意图识别准确率<90%"
+    → 优先: Prompt优化 + 注入更多上下文
+    → 无效: LoRA微调意图分类器（r=4即可，训练快）
+    → 原因: 意图分类是简单任务，小rank足够
+```
+
+##### 6.4.3.6 LoRA/QLoRA 面试高频追问
+
+**Q: LoRA为什么有效？背后的数学原理是什么？**
+
+> 核心论文（Hu et al., 2021）发现：大模型在下游任务适配时，权重更新矩阵ΔW的秩远小于原始权重矩阵的维度。这意味着可以用两个低秩矩阵的乘积来近似ΔW。从信息论角度看，大模型已经学习了通用语言知识，下游任务只需要"调整"一小部分"方向"，这些方向天然是低秩的。
+
+**Q: r=8就够了吗？会不会欠拟合？**
+
+> 原作者实验证明：r=1到r=64在多数NLP任务上效果差异不大（<1%）。r=8是性价比最佳的选择。原因是大模型的hidden state维度（4096/8192）远大于任务真正需要的"调整方向"。但如果任务非常复杂（如数学推理、代码生成），可以尝试r=32或64。
+
+**Q: LoRA权重可以合并回原模型吗？**
+
+> 可以。训练完成后，`W_new = W + B·A`，可以直接把LoRA权重合并回原模型，推理时无额外开销。PEFT库提供 `model.merge_and_unload()` 方法一键完成。
+
+**Q: 哪些层应该加LoRA？**
+
+> 论文建议只对Attention的Q和V投影加LoRA（`q_proj`, `v_proj`），效果已很好。扩展到K和O投影（`k_proj`, `o_proj`）以及FFN层有时会略好，但参数量翻倍。对于本项目，意图识别等简单任务选Q+V即可，文案生成等复杂任务可扩展到Q+K+V+O。
 
 #### 6.4.4 调优优先级决策树
 
@@ -1380,6 +1725,49 @@ AgentResult r2 = f2.join();
 
 ---
 
+### 追加面试题：模型微调与RAG评估（Q41-Q45）
+
+**Q41: LoRA和QLoRA的区别是什么？什么时候用哪个？**
+
+| 维度 | LoRA | QLoRA |
+|------|------|-------|
+| 基座模型精度 | FP16/BF16 | 4-bit量化（NF4） |
+| 显存需求 (7B) | ~14GB | ~6GB |
+| 训练速度 | 快 | 略慢（反量化开销） |
+| 效果 | 基线 | 接近LoRA（差距<1%） |
+| 适用显卡 | RTX 3090/4090 (24GB) | RTX 3060 (12GB) |
+| 适用场景 | 有中高端GPU | 消费级GPU/Colab免费版 |
+
+选择原则：有24GB以上显存 → LoRA（训练更快）；只有12GB以下 → QLoRA（能跑起来比什么都重要）。
+
+**Q42: 怎么判断是RAG的问题（知识没检索到）还是LLM的问题（检索到了但没用对）？**
+
+> "最直接的方法是查看LLM的输入上下文。如果检索到的chunk确实包含答案但LLM没用到 → LLM推理问题，优化Prompt。如果检索到的chunk本身就不包含答案 → 分块策略或embedding模型的问题。
+>
+> 工程上可以对比两个指标：Context Recall（检索内容覆盖答案的比例）低 → RAG问题；Faithfulness（回答忠于检索内容的比例）低 → LLM问题。本项目虽然没有系统化的RAG评估，但通过repeated_question检测暗示了'用户没得到满意答案'，结合人工抽样可以判断根因。"
+
+**Q43: 为什么不直接用大chunk_size（如2000字符）一次性包含更多信息？**
+
+> "三个原因：1) 大chunk导致检索精度下降——用户问'退货流程'，但chunk里还包含了退款、换货、投诉等无关内容，LLM被噪声干扰；2) embedding模型的语义表达能力有限——长文本的embedding向量会"平均化"所有语义，导致向量相似度匹配不准；3) Token浪费——大chunk注入LLM上下文后，有效信息密度降低。经验上300-500字符是最优区间。"
+
+**Q44: 微调后怎么评估效果？需要AB测试吗？**
+
+> "必须AB测试。微调后模型作为实验组，原模型作为对照组，分流用户流量对比：1) Agent维度的满意度变化；2) 具体差评原因（inaccurate/irrelevant等）的变化；3) Token消耗是否减少（微调后可能需要更短的Prompt）；4) 延迟是否有变化。通常至少观察1-2周才有统计学意义。"
+
+**Q45: LangGraph的Checkpointer和本项目的MemoryService有什么本质区别？**
+
+> "Checkpointer是LangGraph的**状态持久化中间件**——它在图的每个节点执行后自动保存State快照，不依赖开发者手动调用。本项目的MemoryService是**显式的记忆管理**——开发者决定何时保存、保存什么。
+>
+> 分层对比：
+> - 自动化程度: Checkpointer全自动，MemoryService手动
+> - 粒度: Checkpointer保存完整State，MemoryService按字段分别管理
+> - 恢复能力: Checkpointer支持时间旅行（恢复到历史任意快照），MemoryService不支持
+> - 性能开销: Checkpointer每个节点都写，IO开销大；MemoryService按需写，更灵活
+>
+> 生产环境建议：用Checkpointer自动保存状态 + 手动管理对话历史的摘要压缩（Checkpointer保完整历史，手动管理保Token成本控制）。"
+
+---
+
 ## 八、面试追问应对
 
 ### "这个项目有实际上线吗？"
@@ -1406,6 +1794,32 @@ AgentResult r2 = f2.join();
 
 > "目前通过sessionId+userId关联+messageIndex定位具体对话轮次，可以在分析时过滤异常模式（如同一用户短时间内大量差评）。生产环境可加入行为异常检测（如统计每个用户的差评率，超出3σ标记为异常）。"
 
+### "做模型微调的话，大概需要多少数据？怎么标注？"
+
+> "最低门槛：LoRA用500条SFT数据就能看到明显效果，DPO用300对偏好数据。数据来源就是本项目的质量数据闭环——点赞的正样本+点踩的负样本。
+>
+> 标注策略分三层：1) 自动标注：从chat_feedback中提取rating=1的对话轮次，自动构造instruction-output对；2) 半自动标注：LLM生成回复，人工打分筛选（成本1/3）；3) 纯人工标注：对关键场景（如退换货政策）人工撰写标准回答。建议先自动+半自动凑够500条跑LoRA实验，看效果再决定是否加人工标注。"
+
+### "文档分块效果不好，整个RAG就废了，你们有做什么来保证吗？"
+
+> "分块是RAG的根基，但目前业界确实没有银弹。我的思路是三层保障：
+>
+> 1. **分块设计层面**：句子感知分割+overlap，保证chunk边界落在自然语言边界上，减少语义截断
+> 2. **检索层面**：topK=5 + 分类过滤，扩大检索范围后用knowledge_type/sub_type筛选，降低'漏掉正确答案'的概率
+> 3. **LLM层面**：在Prompt中要求LLM'如果检索内容不足以回答问题，请明确说明'，避免一本正经地胡说八道
+>
+> 如果你有时间和资源，最理想的做法是跑网格搜索实验（chunk_size从200到1000，overlap从5%到20%），用Hit Rate和MRR评估，找到最优参数组合。"
+
+### "如果要微调模型，怎么验证微调后的模型比原来的好？"
+
+> "四层验证：
+> 1. **离线评测**：在留出的200条测试集上对比微调前后模型的输出（BLEU/ROUGE + 人工打分）
+> 2. **A/B在线实验**：微调模型作为实验组 vs 原模型作为对照组，分流5%流量观察2周
+> 3. **核心指标对比**：满意度、点踩率、重复提问率、转人工率四个维度对比
+> 4. **坏例分析**：重点看微调后是否引入了新的错误模式（如对一个问题的回答变好了，但对另一个问题变差了）
+>
+> 微调最大的风险是'灾难性遗忘'——学了这个忘了那个。所以验证不仅要看目标任务的提升，还要检查非目标任务是否有退化。"
+
 ---
 
 ## 九、面试前准备清单
@@ -1430,3 +1844,204 @@ AgentResult r2 = f2.join();
 - [ ] 能对比SimpleVectorStore和Milvus的差异
 - [ ] 准备了"最大挑战"的回答（上下文截断+LLM输出不稳定）
 - [ ] 准备了"重新设计会怎么做"的回答（消息队列+并行+全链路追踪）
+- [ ] 能解释文档分块策略的评估方法和指标（chunk_size / overlap / 检索命中率）
+- [ ] 能讲清楚LoRA/QLoRA的原理、参数选择、以及与本项目的结合点
+- [ ] 能画出LangGraph的核心架构图（StateGraph / Node / Edge / ConditionalEdge / Checkpointer）
+
+
+---
+
+## 十、文档分块策略与RAG评估指标
+
+面试中经常被问到："你的知识库分块策略是怎么确定的？怎么评估分块效果好不好？"本节系统回答RAG评估问题。
+
+### 10.1 本项目当前分块策略
+
+```
+当前参数:
+  chunk_size: 500字符
+  chunk_overlap: 50字符
+  分割方式: 句子感知滑动窗口（按中英文句末标点断句）
+  向量模型: BAAI/bge-large-zh-v1.5 (1024维)
+  向量存储: SimpleVectorStore (内存)
+```
+
+### 10.2 分块策略评估的核心指标
+
+评估文档分块质量需要从**检索**和**生成**两个层面观察。
+
+#### 10.2.1 检索层面指标
+
+| 指标 | 定义 | 计算方式 | 本项目如何观测 |
+|------|------|---------|-------------|
+| **Hit Rate (命中率)** | top-K检索结果中包含正确答案的比例 | `有正确答案的query数 / 总query数` | 对知识库中已有答案的问题抽样测试，统计topK=3时是否命中 |
+| **MRR (Mean Reciprocal Rank)** | 第一个正确答案排名的倒数均值 | `1/N * Σ(1/rank_i)` | 更关注"正确答案排第几"，值越高越靠前 |
+| **NDCG@K** | 归一化折损累计增益 | 考虑排名位置的相关性加权 | 需要人工标注相关性分数（0-3） |
+| **Context Precision** | 检索到的内容中相关内容的比例 | `相关chunk数 / 检索到的总chunk数` | 需要标注哪些chunk对回答问题有帮助 |
+
+#### 10.2.2 生成层面指标
+
+| 指标 | 定义 | 本项目如何观测 |
+|------|------|-------------|
+| **Faithfulness (忠实度)** | 生成回答中可归于检索内容的语句比例 | 抽样人工评估：回答中的事实点是否都能在检索chunk中找到 |
+| **Answer Relevance** | 回答与用户问题的相关性 | 通过用户点踩率（inaccurate/irrelevant比例）间接反映 |
+| **Context Recall** | 检索到的内容覆盖ground truth answer的程度 | 需要标注"完整答案需要哪些信息点" |
+
+### 10.3 不同分块策略的对比
+
+```
+策略对比:
+┌─────────────────────────────────────────────────────────────────┐
+│ 策略1: 固定长度分块 (本项目当前方案)                               │
+│   chunk_size=500, overlap=50                                     │
+│   优点: 简单，性能稳定                                            │
+│   缺点: 可能把完整的语义单元（如一个退换货政策段落）切碎             │
+│   适用: 文档结构简单、内容均匀的知识库                              │
+├─────────────────────────────────────────────────────────────────┤
+│ 策略2: 语义分块 (Semantic Chunking)                              │
+│   按段落、章节标题分割，保持语义完整性                             │
+│   优点: 每个chunk是一个完整的语义单元                              │
+│   缺点: chunk大小不均，大的可能超token限制                         │
+│   适用: 结构化的知识文档（FAQ、政策文档）                          │
+├─────────────────────────────────────────────────────────────────┤
+│ 策略3: 递归分块 (Recursive Splitting)                           │
+│   按分隔符优先级分层分割: \n\n → \n → 。 → . → 空格               │
+│   优点: 兼顾语义和大小限制                                        │
+│   缺点: 实现稍复杂                                                │
+│   适用: 混合类型文档                                              │
+├─────────────────────────────────────────────────────────────────┤
+│ 策略4: 句子窗口分块 (Sentence Window)                            │
+│   每个句子独立embedding，检索时取周边句子                         │
+│   优点: 检索粒度最细                                              │
+│   缺点: 需要二次扩展检索，增加延迟                                 │
+│   适用: 对精度要求极高的场景                                      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 10.4 分块参数调优实验方法
+
+#### 10.4.1 准备评估数据集
+
+```sql
+-- 步骤1: 从知识库文档中随机抽取30-50个知识点作为"ground truth"
+-- 每个知识点对应一个"标准问题"，答案已知在某个文档的某个chunk中
+
+-- 示例评估数据集:
+评估样本 = [
+  {"question": "退货的运费谁承担？", "expected_chunk": "doc_after_sales_chunk_2"},
+  {"question": "优惠券过期了能恢复吗？", "expected_chunk": "doc_coupon_chunk_4"},
+  {"question": "会员积分怎么获取？", "expected_chunk": "doc_member_chunk_1"},
+  ...  // 建议30-50条
+]
+```
+
+#### 10.4.2 网格搜索最佳参数
+
+```python
+# 对不同 (chunk_size, overlap) 组合进行实验
+import itertools
+
+chunk_sizes = [200, 300, 500, 800, 1000]
+overlap_ratios = [0.05, 0.10, 0.15, 0.20]  # overlap / chunk_size
+
+results = []
+for size, ratio in itertools.product(chunk_sizes, overlap_ratios):
+    overlap = int(size * ratio)
+
+    # 1. 用该参数重新分块 + 入库
+    reindex_with_params(chunk_size=size, chunk_overlap=overlap)
+
+    # 2. 对评估数据集的每个问题执行检索
+    hit_count = 0
+    mrr_sum = 0
+    for sample in eval_dataset:
+        chunks = vector_search(sample["question"], top_k=3)
+        # 检查是否命中 ground_truth chunk
+        if sample["expected_chunk"] in [c.id for c in chunks]:
+            hit_count += 1
+        # 计算 MRR
+        for rank, c in enumerate(chunks, 1):
+            if c.id == sample["expected_chunk"]:
+                mrr_sum += 1.0 / rank
+                break
+
+    hit_rate = hit_count / len(eval_dataset)
+    mrr = mrr_sum / len(eval_dataset)
+    results.append({"size": size, "overlap": overlap, "hit_rate": hit_rate, "mrr": mrr})
+
+# 选择 hit_rate 和 mrr 综合最优的参数
+best = max(results, key=lambda r: r["hit_rate"] * 0.6 + r["mrr"] * 0.4)
+```
+
+#### 10.4.3 本项目可落地的轻量评估方案
+
+由于当前项目使用 `SimpleVectorStore`（内存），全量重新分块实验成本低：
+
+```java
+// 步骤1: 准备评估用标准问题集（可以从 QualityAnalysis 提取高频问题）
+// 步骤2: 修改 DocumentVectorServiceImpl 中的 CHUNK_SIZE 和 CHUNK_OVERLAP
+// 步骤3: 重启服务，SystemBootstrap 自动重新分块入库
+// 步骤4: 对每个标准问题调用 DocumentVectorService.search()，检查检索结果
+// 步骤5: 记录不同参数下的 Hit Rate 和 MRR
+// 步骤6: 选定最优参数后固定到常量中
+```
+
+### 10.5 生产环境可观测指标
+
+即使不做专门的评估实验，以下指标也能反映分块质量：
+
+```
+指标1: RAG问答的dislike率
+  来源: chat_feedback 表 (agent_name='knowledge_intent', rating=-1)
+  关联: 如果 inaccurate/irrelevant 差评高 → 可能chunk太小导致信息不全
+        如果 incomplete 差评高 → 可能chunk太大导致检索到的chunk不精确
+
+指标2: 重复提问率
+  来源: session_quality_metrics (metric_type='repeated_question')
+  关联: 同一知识类别的重复提问率高 → 用户没得到满意答案
+        → 可能检索到了相关度不高的chunk → 分块策略需要优化
+
+指标3: 知识库Agent的满意度趋势
+  来源: agent_quality_analysis 表 (agent_name='knowledge_intent')
+  监控: 满意度连续3天下降 → 考虑是否需要调整chunk策略
+
+指标4: 检索返回chunk的文本长度分布
+  观测: 检索返回的chunk平均长度是否和chunk_size接近
+  异常: 如果大部分chunk远小于chunk_size → 说明了大量语义碎片化
+
+指标5: Token消耗
+  观测: KnowledgeIntentAgent 每次LLM调用的Token消耗
+  关联: chunk太大 → 注入LLM的上下文长 → Token消耗高
+        chunk太小 → 需要更多chunk才能覆盖完整答案 → Token消耗也高
+  目标: 找到平衡点
+```
+
+### 10.6 Chunk Size选择的经验法则
+
+| 文档类型 | 推荐chunk_size | 推荐overlap | 原因 |
+|---------|---------------|-------------|------|
+| FAQ/短问答 | 200-300 | 30-50 | 每个问答就是完整的语义单元 |
+| 政策文档/合同 | 500-800 | 50-100 | 条款之间相互关联 |
+| 产品说明/教程 | 300-500 | 30-60 | 中等粒度，每个段落有独立信息 |
+| 长文/博客 | 800-1200 | 100-150 | 上下文跨度大 |
+| 混合知识库（本项目） | 300-500 | 50-80 | 兼顾FAQ的简洁和政策文档的完整性 |
+
+### 10.7 面试话术
+
+> "评估分块策略我主要看两个层面。检索层面用 Hit Rate 和 MRR 量化——抽30-50个标准问题，看正确答案在第几位被检索到。生成层面用用户反馈间接衡量——knowledge_intent Agent的dislike率、重复提问率，以及答案忠实度的人工抽查。
+>
+> 最实用的做法是网格搜索：对 chunk_size 从200到1000，overlap 从5%到20%，每个组合跑一轮评估，画出 Hit Rate 曲线，选拐点。对于本项目这种FAQ+政策混合的知识库，我推荐300-500字符，10% overlap。太小导致信息碎片化，太大导致检索不精确。"
+
+### 10.8 与模型评测的区别
+
+面试中注意区分两个概念：
+
+| 维度 | RAG分块评估 | 模型质量评估 |
+|------|-----------|-------------|
+| 评估对象 | 文档分割 + 向量检索 | LLM输出质量 |
+| 核心指标 | Hit Rate, MRR, Context Precision | 满意度, 准确率, 忠实度 |
+| 优化手段 | 调整chunk参数、切换embedding模型 | Prompt优化、模型选择、微调 |
+| 数据需求 | 少量标注（30-50条） | 大量反馈数据（>500条） |
+| 本项目实现 | 尚未系统化（本次补充） | 质量数据闭环已实现 |
+
+**两者需要结合**：分块好 → 检索对 → LLM有正确上下文 → 回答好。分块差 → 检索错 → LLM"巧妇难为无米之炊"。
