@@ -28,6 +28,13 @@ public abstract class BaseAgent {
         this.maxRetries = maxRetries;
     }
 
+    /**
+     * 获取 Agent 名称
+     */
+    public String getName() {
+        return name;
+    }
+
     protected abstract AgentResult execute(Map<String, Object> params) throws Exception;
 
     public CompletableFuture<AgentResult> runAsync(Map<String, Object> params) {

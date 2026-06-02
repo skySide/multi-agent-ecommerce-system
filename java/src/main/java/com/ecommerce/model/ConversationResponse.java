@@ -38,6 +38,32 @@ public class ConversationResponse {
     /** 对话摘要 */
     private String summary;
 
+    /** 子任务执行结果列表（多意图场景，展示各子Agent执行状态和耗时） */
+    private List<SubTaskResult> subTasks;
+
     @Builder.Default
     private Instant timestamp = Instant.now();
+
+    /**
+     * 子任务执行结果
+     * 用于前端展示多意图场景下各子Agent的执行状态
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SubTaskResult {
+
+        /** Agent名称 */
+        private String agentName;
+
+        /** 是否执行成功 */
+        private boolean success;
+
+        /** 执行耗时（毫秒） */
+        private double latencyMs;
+
+        /** 子Agent返回的回复文本 */
+        private String reply;
+    }
 }

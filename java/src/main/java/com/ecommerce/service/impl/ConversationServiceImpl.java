@@ -203,6 +203,25 @@ public class ConversationServiceImpl implements ConversationService {
             extractedInfo = (Map<String, Object>) entitiesObj;
         }
 
+        // 步骤1: 提取子任务结果（多意图场景）
+        List<ConversationResponse.SubTaskResult> subTasks = Collections.emptyList();
+        Object subTasksObj = data.get("subTasks");
+        if (subTasksObj instanceof List) {
+            List<?> rawList = (List<?>) subTasksObj;
+            subTasks = rawList.stream()
+                    .filter(item -> item instanceof Map)
+                    .map(item -> {
+                        Map<String, Object> taskMap = (Map<String, Object>) item;
+                        return ConversationResponse.SubTaskResult.builder()
+                                .agentName((String) taskMap.getOrDefault("agentName", ""))
+                                .success((boolean) taskMap.getOrDefault("success", false))
+                                .latencyMs(((Number) taskMap.getOrDefault("latencyMs", 0)).doubleValue())
+                                .reply((String) taskMap.getOrDefault("reply", ""))
+                                .build();
+                    })
+                    .toList();
+        }
+
         return ConversationResponse.builder()
                 .sessionId(sessionId)
                 .message(reply)
@@ -211,6 +230,7 @@ public class ConversationServiceImpl implements ConversationService {
                 .extractedInfo(extractedInfo)
                 .dialogueHistory(dialogueHistory)
                 .summary(summary)
+                .subTasks(subTasks)
                 .timestamp(java.time.Instant.now())
                 .build();
     }

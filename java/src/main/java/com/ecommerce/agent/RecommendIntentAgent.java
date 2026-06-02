@@ -4,10 +4,9 @@ import com.ecommerce.entity.Product;
 import com.ecommerce.entity.UserProfile;
 import com.ecommerce.model.AgentResult;
 import com.ecommerce.model.response.RecResult;
-import com.ecommerce.service.MemoryService;
 import com.ecommerce.tool.ProductSearchTool;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
@@ -17,34 +16,21 @@ import java.util.stream.Collectors;
 /**
  * 推荐意图Agent
  *
- * <p>基于 LLM + Tools + entity() 的真正 Agent 模式：
- * 将对话上下文、用户画像、实体信息组装为提示词，注册 {@link ProductSearchTool} 工具，
- * 由大模型理解用户意图后自主决定调用哪个工具获取商品，最后通过 .entity() 返回结构化结果。</p>
+ * 基于 ReAct（Observe → Think → Act）模式：
+ * 将对话上下文、用户画像、实体信息组装为提示词，注册 ProductSearchTool 工具，
+ * 由大模型理解用户意图后自主决定调用哪个工具获取商品，通过 .entity() 返回结构化结果。
  *
- * <p>同时为 {@link CompareIntentAgent} 提供 {@link #resolveProductsForComparison} 方法，
- * 该方法不使用用户画像（withoutUserProfile），仅根据会话上下文 + 意图实体让 LLM 定位商品。</p>
+ * 同时为 CompareIntentAgent 提供 resolveProductsForComparison 方法，
+ * 该方法不使用用户画像（withoutUserProfile），仅根据会话上下文 + 意图实体让 LLM 定位商品。
  */
 @Component
-public class RecommendIntentAgent extends BaseAgent {
-
-    @Resource
-    private ChatClient chatClient;
-
-    @Resource
-    private MemoryService memoryService;
+public class RecommendIntentAgent extends ReActAgent {
 
     @Resource
     private ProductSearchTool productSearchTool;
 
-    public RecommendIntentAgent() {
-        super("recommend_intent", 10.0, 2);
-    }
-
     // ==================== 系统提示词 ====================
 
-    /**
-     * 推荐场景系统提示词
-     */
     private static final String RECOMMEND_SYSTEM_PROMPT = """
             你是一个资深的电商商品推荐专家。你必须先调用工具获取商品数据，不能直接回答。
             工具返回的是数据库中完整的商品信息（Product），请严格基于工具返回的结果做推荐决策，
@@ -61,9 +47,6 @@ public class RecommendIntentAgent extends BaseAgent {
             {"products":[{"productId":"P001","productName":"iPhone 16","brand":"Apple","price":7999}]}
             """;
 
-    /**
-     * 对比场景系统提示词（withoutUserProfile）
-     */
     private static final String COMPARISON_SYSTEM_PROMPT = """
             你是一个电商商品搜索专家，负责根据上下文精准定位用户想对比的商品。
             你必须先调用工具获取商品数据，不能直接回答。工具返回的是数据库中完整的商品信息（Product），
@@ -79,8 +62,42 @@ public class RecommendIntentAgent extends BaseAgent {
             {"products":[{"productId":"P001","productName":"iPhone 16","brand":"Apple","price":7999}]}
             """;
 
-    // ==================== Agent 主入口（withUserProfile） ====================
+    // ==================== 构造与初始化 ====================
 
+    public RecommendIntentAgent() {
+        super("recommend_intent", 10.0, 2);
+    }
+
+    @PostConstruct
+    public void init() {
+        registerTool(productSearchTool);
+    }
+
+    // ==================== ReActAgent 抽象方法实现 ====================
+
+    @Override
+    protected String buildSystemPrompt(Map<String, Object> params) {
+        return RECOMMEND_SYSTEM_PROMPT;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    protected String buildUserMessage(Map<String, Object> params) {
+        // 步骤1: 提取参数
+        String userId = (String) params.get("userId");
+        String message = (String) params.get("message");
+        String sessionId = (String) params.get("sessionId");
+        List<String> history = (List<String>) params.get("history");
+        String summary = (String) params.get("summary");
+        Map<String, Object> entities = (Map<String, Object>) params.get("entities");
+
+        return buildRecommendUserMessage(userId, message, sessionId, history, summary, entities);
+    }
+
+    /**
+     * 重写 execute() 以支持 .entity(RecResult.class) 结构化输出
+     * 在 ReAct 框架的基础上保留对商品实体的精确获取
+     */
     @Override
     @SuppressWarnings("unchecked")
     protected AgentResult execute(Map<String, Object> params) throws Exception {
@@ -95,29 +112,52 @@ public class RecommendIntentAgent extends BaseAgent {
         log.info("RecommendIntentAgent.execute - userId: {}, entities: {}", userId,
                 entities != null ? entities.keySet() : "null");
 
-        // 步骤2 构建带用户画像的提示词
+        // 步骤2: Think → 构建带用户画像的提示词
+        String systemPrompt = buildSystemPrompt(params);
         String userMessage = buildRecommendUserMessage(userId, message, sessionId, history, summary, entities);
 
-        // 步骤3 利用大模型调用工具，获取对应的数据
-        RecResult result = chatClient.prompt()
-                .system(RECOMMEND_SYSTEM_PROMPT)
-                .tools(productSearchTool)
-                .user(userMessage)
-                .call()
-                .entity(RecResult.class);
+        // 步骤3: Act → 调用 LLM + Tools（Spring AI 内部处理 Tool Calling 循环）
+        // ReAct 循环上限 3 轮，每轮检查中断标志
+        int iteration = 0;
+        RecResult recResult = null;
 
-        List<Product> products = result != null && !CollectionUtils.isEmpty(result.getProducts())
-                ? result.getProducts() : Collections.emptyList();
+        while (iteration < MAX_ITERATIONS && !Thread.currentThread().isInterrupted()) {
+            iteration++;
+            log.info("RecommendIntentAgent.execute - 第{}轮 Think+Act, userId: {}", iteration, userId);
 
-        // 步骤4: 生成推荐回复
+            recResult = chatClient.prompt()
+                    .system(systemPrompt)
+                    .tools(getTools().toArray())
+                    .user(userMessage)
+                    .call()
+                    .entity(RecResult.class);
+
+            // Observe → 检查结果
+            if (recResult != null && !CollectionUtils.isEmpty(recResult.getProducts())) {
+                log.info("RecommendIntentAgent.execute - 第{}轮 Observe 成功, 商品数: {}",
+                        iteration, recResult.getProducts().size());
+                break;
+            }
+
+            log.warn("RecommendIntentAgent.execute - 第{}轮 Observe 为空", iteration);
+        }
+
+        // 处理中断
+        if (Thread.currentThread().isInterrupted()) {
+            log.warn("RecommendIntentAgent.execute - 检测到线程中断");
+            return fallback(0, new InterruptedException("Agent interrupted"));
+        }
+
+        // 步骤4: 提取商品列表并生成回复
+        List<Product> products = recResult != null && !CollectionUtils.isEmpty(recResult.getProducts())
+                ? recResult.getProducts() : Collections.emptyList();
         String reply = generateRecommendReply(products);
 
-        // 步骤5: 将推荐商品ID保存到entities中，供后续对比使用
+        // 步骤5: 组装返回结果
         Map<String, Object> data = new HashMap<>();
         data.put("reply", reply);
         data.put("products", products);
 
-        // 步骤6: 保存推荐商品ID供后续对比使用
         Map<String, Object> enrichedEntities = new HashMap<>(entities != null ? entities : new HashMap<>());
         enrichedEntities.put("recommended_product_ids", products.stream()
                 .map(Product::getProductId)
@@ -128,43 +168,35 @@ public class RecommendIntentAgent extends BaseAgent {
         return AgentResult.builder().agentName(name).success(true).data(data).confidence(0.9).build();
     }
 
+    @Override
+    protected AgentResult buildResult(String llmResponse, Map<String, Object> params) {
+        // 默认实现（由 execute() 覆盖时不会调用至此）
+        return AgentResult.builder().agentName(name).success(true)
+                .data(Map.of("reply", llmResponse)).confidence(1.0).build();
+    }
+
     // ==================== 对比场景商品定位（withoutUserProfile） ====================
 
     /**
-     * 为对比场景定位商品（<b>withoutUserProfile</b>）
+     * 为对比场景定位商品（withoutUserProfile）
      *
-     * <p>与 {@link #execute} 的核心差异：
-     * <ul>
-     *   <li>不使用用户画像（UserProfile）—— 对比不关心用户偏好，只需精准定位商品</li>
-     *   <li>系统提示词引导 LLM 优先使用 getProductsByIds / retrieveSimilarProducts，
-     *       根据实体内容（product_ids / indices / product_names / brand / category）选择策略</li>
-     *   <li>通过 .entity(RecResult.class) 获取 LLM 结构化输出，
-     *       而非直接调用 Service 方法</li>
-     * </ul>
-     *
-     * @param message   用户原始消息（如"比较华为和联想电脑"）
-     * @param userId    用户ID
-     * @param sessionId 会话ID
-     * @param history   对话历史
-     * @param summary   对话摘要
-     * @param entities  意图识别实体（透传，LLM 自行判断如何使用）
-     * @return 定位到的商品列表
+     * 与 execute 的核心差异：不使用用户画像，LLM 优先使用 getProductsByIds / retrieveSimilarProducts
      */
     @SuppressWarnings("unchecked")
     public List<Product> resolveProductsForComparison(String message, String userId, String sessionId,
                                                        List<String> history, String summary,
                                                        Map<String, Object> entities) {
-        log.info("RecommendIntentAgent.resolveProductsForComparison (withoutUserProfile) - message: {}, entities: {}",
+        log.info("RecommendIntentAgent.resolveProductsForComparison - message: {}, entities: {}",
                 message, entities != null ? entities.keySet() : "null");
 
-        // 合并会话上下文得到完整实体
+        // 步骤1: 合并会话上下文得到完整实体
         Map<String, Object> mergedEntities = memoryService.mergeWithSessionMemory(sessionId,
                 entities != null ? entities : new HashMap<>());
 
-        // 构建对比场景用户提示词
+        // 步骤2: 构建对比场景用户提示词
         String userMessage = buildComparisonUserMessage(message, history, summary, mergedEntities);
 
-        // LLM + Tools + entity() — LLM 根据上下文自主选择工具定位商品
+        // 步骤3: LLM + Tools + entity()
         RecResult result = chatClient.prompt()
                 .system(COMPARISON_SYSTEM_PROMPT)
                 .tools(productSearchTool)
@@ -181,24 +213,19 @@ public class RecommendIntentAgent extends BaseAgent {
 
     // ==================== 提示词构建 ====================
 
-    /**
-     * 构建推荐场景用户提示词（含用户画像）
-     */
     private String buildRecommendUserMessage(String userId, String message, String sessionId,
                                               List<String> history, String summary,
                                               Map<String, Object> entities) {
         StringBuilder sb = new StringBuilder();
-
-        // 用户标识
         sb.append(String.format("用户ID: %s\n", userId));
 
-        // 长期记忆：查询 user_profile 表的持久化画像数据
+        // 长期记忆
         String longTermContext = memoryService.buildLongTermContext(userId);
         if (longTermContext != null && !longTermContext.isEmpty()) {
             sb.append("\n【长期偏好】\n").append(longTermContext).append("\n");
         }
 
-        // 短期记忆：本次会话中合并跨轮实体得到的临时偏好
+        // 短期记忆
         Map<String, Object> mergedEntities = memoryService.mergeWithSessionMemory(sessionId, entities);
         UserProfile profile = memoryService.buildProfileFromEntities(userId, mergedEntities);
         sb.append(String.format("\n【短期偏好】%s\n", profileToString(profile)));
@@ -217,7 +244,7 @@ public class RecommendIntentAgent extends BaseAgent {
         // 当前消息
         sb.append("\n【用户当前需求】\n").append(message).append("\n");
 
-        // 已提取的实体
+        // 已提取实体
         if (entities != null && !entities.isEmpty()) {
             sb.append("\n【已提取实体】\n");
             entities.forEach((k, v) -> sb.append(String.format("  %s: %s\n", k, v)));
@@ -227,29 +254,19 @@ public class RecommendIntentAgent extends BaseAgent {
         return sb.toString();
     }
 
-    /**
-     * 构建对比场景用户提示词（withoutUserProfile）
-     */
     private String buildComparisonUserMessage(String message, List<String> history,
                                                String summary, Map<String, Object> mergedEntities) {
         StringBuilder sb = new StringBuilder();
-
-        // 对话上下文
         String historyContext = memoryService.buildHistoryContext(history, summary);
         if (!historyContext.isEmpty()) {
             sb.append("【对话上下文】\n").append(historyContext).append("\n\n");
         }
-
-        // 用户原始问题
         sb.append("【用户问题】\n").append(message).append("\n\n");
-
-        // 合并后的完整实体
         if (mergedEntities != null && !mergedEntities.isEmpty()) {
             sb.append("【实体信息（含会话历史）】\n");
             mergedEntities.forEach((k, v) -> sb.append(String.format("  %s: %s\n", k, v)));
             sb.append("\n");
         }
-
         sb.append("请根据以上上下文和实体信息，选择合适的工具定位用户想对比的商品。");
         return sb.toString();
     }
@@ -257,12 +274,9 @@ public class RecommendIntentAgent extends BaseAgent {
     // ==================== 回复生成 ====================
 
     private String generateRecommendReply(List<Product> products) {
-        // 步骤1: 处理空列表
         if (products.isEmpty()) {
             return "抱歉，暂时没有合适的商品推荐给您。您可以告诉我更具体的需求，比如预算、品牌偏好等。";
         }
-
-        // 步骤2: 拼接推荐列表文本（包含商品ID以便后续对比时识别）
         StringBuilder sb = new StringBuilder("根据您的需求，我为您精选了以下商品：\n\n");
         for (int i = 0; i < products.size(); i++) {
             Product p = products.get(i);
