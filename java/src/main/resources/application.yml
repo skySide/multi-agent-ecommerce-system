@@ -18,7 +18,6 @@ spring:
       embedding:
         options:
           model: ${SILICONFLOW_EMBEDDING_MODEL:BAAI/bge-large-zh-v1.5}
-          dimensions: 768
   datasource:
     url: jdbc:mysql://localhost:3306/ecommerce?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8
     username: root
