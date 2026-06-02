@@ -85,8 +85,9 @@ public class KnowledgeClassifyServiceImpl implements KnowledgeClassifyService {
             String prompt = String.format(CLASSIFY_PROMPT, historyContext, query);
 
             // 步骤2: 调用 LLM 获取 JSON 响应，使用 BeanOutputConverter 自动反序列化为 DTO
-            var converter = new BeanOutputConverter<>(ClassifyResultDTO.class);
+            BeanOutputConverter<ClassifyResultDTO> converter = new BeanOutputConverter<>(ClassifyResultDTO.class);
             String response = chatClient.prompt().user(prompt).call().content();
+            log.info("KnowledgeClassifyServiceImpl.classify - LLM原始响应: {}", response);
             ClassifyResultDTO result = converter.convert(response);
 
             // 步骤3: 记录分类结果

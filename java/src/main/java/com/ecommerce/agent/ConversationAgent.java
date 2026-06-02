@@ -2,34 +2,37 @@ package com.ecommerce.agent;
 
 import com.ecommerce.entity.ConversationSession;
 import com.ecommerce.model.AgentResult;
-import com.ecommerce.model.response.IntentRecognitionResult;
+import com.ecommerce.model.response.IntentItem;
+import com.ecommerce.model.response.MultiIntentRecognitionResult;
+import com.ecommerce.orchestrator.AgentOrchestrator;
 import com.ecommerce.service.ConversationSessionService;
 import com.ecommerce.service.MemoryService;
 import com.ecommerce.service.RepeatedQuestionDetector;
 import com.ecommerce.service.SessionQualityMetricsService;
 import com.ecommerce.service.UserBehaviorService;
+import com.ecommerce.util.IntentAgentResolver;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 对话编排Agent
  * 负责意图识别、子Agent路由分发、记忆管理
  *
  * 流程：
- *   ① 意图识别（LLM）
- *   ② 日志打印意图识别结果
- *   ③ 根据意图路由到对应的子Agent
- *   ④ 日志打印路由目标
- *   ⑤ 调用子Agent执行
- *   ⑥ 更新记忆（保存对话历史）
- *   ⑦ 返回结果
+ *   ① 意图识别（LLM → 单意图 or 多意图？）
+ *   ② 单意图 → Route 快速路径（IntentAgentResolver 查表路由到 ReActAgent）
+ *   ③ 多意图 → 委托 AgentOrchestrator（Plan & Execute 调度）
+ *   ④ 更新记忆
+ *   ⑤ 聚合结果返回
  *
  * 说明：session创建/校验、短期记忆获取由 ConversationServiceImpl 完成
  */
@@ -55,24 +58,15 @@ public class ConversationAgent extends BaseAgent {
     private SessionQualityMetricsService sessionQualityMetricsService;
 
     @Resource
-    private List<BaseAgent> intentAgents;
+    private IntentAgentResolver intentAgentResolver;
 
-    private final Map<String, BaseAgent> intentRouter = new LinkedHashMap<>();
+    @Resource
+    private AgentOrchestrator agentOrchestrator;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /** 正在执行的 CompletableFuture，key 为 sessionId，用于停止生成 */
     private final Map<String, CompletableFuture<AgentResult>> runningFutures = new ConcurrentHashMap<>();
-
-    /** 意图 → 子Agent名称 映射 */
-    private static final Map<String, String> INTENT_AGENT_MAPPING = Map.of(
-            "recommend", "recommend_intent",
-            "product_query", "product_query_intent",
-            "knowledge_query", "knowledge_intent",
-            "compare", "compare_intent",
-            "chitchat", "chitchat_intent",
-            "transfer_to_human", "chitchat_intent"
-    );
 
     public ConversationAgent() {
         super("conversation", 15.0, 2);
@@ -80,10 +74,6 @@ public class ConversationAgent extends BaseAgent {
 
     /**
      * 运行并追踪 CompletableFuture，支持取消
-     *
-     * @param sessionId 会话ID
-     * @param params    参数
-     * @return CompletableFuture
      */
     public CompletableFuture<AgentResult> runAndTrack(String sessionId, Map<String, Object> params) {
         CompletableFuture<AgentResult> future = runAsync(params);
@@ -94,9 +84,6 @@ public class ConversationAgent extends BaseAgent {
 
     /**
      * 取消指定会话的生成
-     *
-     * @param sessionId 会话ID
-     * @return 是否成功取消
      */
     public boolean cancelGeneration(String sessionId) {
         CompletableFuture<AgentResult> future = runningFutures.remove(sessionId);
@@ -109,26 +96,10 @@ public class ConversationAgent extends BaseAgent {
         return false;
     }
 
-    @PostConstruct
-    public void init() {
-        for (BaseAgent agent : intentAgents) {
-            if (agent == this) {
-                continue;
-            }
-            for (Map.Entry<String, String> entry : INTENT_AGENT_MAPPING.entrySet()) {
-                if (entry.getValue().equals(agent.name)) {
-                    intentRouter.put(entry.getKey(), agent);
-                    break;
-                }
-            }
-        }
-        log.info("ConversationAgent.init - 意图路由注册完成, 共{}个意图, actual={}", INTENT_AGENT_MAPPING.size(), intentRouter.size());
-    }
-
     @Override
     @SuppressWarnings("unchecked")
     protected AgentResult execute(Map<String, Object> params) throws Exception {
-        // 步骤1: 提取参数（sessionId、history、summary 已由 ConversationServiceImpl 处理）
+        // 步骤1: 提取参数
         String userId = (String) params.get("userId");
         String sessionId = (String) params.get("sessionId");
         String message = (String) params.get("message");
@@ -137,52 +108,215 @@ public class ConversationAgent extends BaseAgent {
 
         log.info("ConversationAgent.execute - 开始处理, userId: {}, sessionId: {}, message: {}", userId, sessionId, message);
 
-        // 步骤2: 计算当前轮次（基于 round_intents 而非滑动窗口的 history，确保长会话中轮次准确）
+        // 步骤2: 计算当前轮次
         int currentRound = getCurrentRound(sessionId);
 
-        // 步骤3: 意图识别
-        IntentRecognitionResult intentResult = recognizeIntent(message, history, summary);
-        String intent = intentResult.getIntent();
-        Map<String, Object> entities = intentResult.getEntities();
+        // 步骤3: 多意图识别
+        MultiIntentRecognitionResult multiIntentResult = recognizeIntents(message, history, summary);
+        List<IntentItem> intentItems = multiIntentResult != null ? multiIntentResult.getIntents() : Collections.emptyList();
 
-        log.info("ConversationAgent.execute - 意图识别结果 ===> intent: {}, entities: {}", intent, entities);
+        log.info("ConversationAgent.execute - 意图识别结果, intentCount: {}, intents: {}",
+                intentItems.size(), intentItems);
 
-        // 步骤4: 路由到子Agent并执行
-        AgentResult subResult = routeAndExecute(intent, entities, userId, sessionId, message, history, summary);
+        // 步骤4: 按意图数分流
+        List<AgentResult> subResults;
+        String primaryIntent;
 
-        // 步骤5: 提取回复内容
-        String reply = extractReply(subResult);
+        if (CollectionUtils.isEmpty(intentItems)) {
+            // 意图识别失败
+            return buildErrorResult(sessionId, history, summary, currentRound, userId, message);
+        } else if (intentItems.size() == 1) {
+            // 步骤4a: 单意图 → Route 快速路径
+            IntentItem singleIntent = intentItems.get(0);
+            primaryIntent = singleIntent.getIntent();
 
-        // 步骤6: 合并entities
-        Map<String, Object> finalEntities = mergeSubAgentEntities(entities, subResult);
+            ReActAgent subAgent = intentAgentResolver.resolve(primaryIntent);
+            if (subAgent == null) {
+                return buildErrorResult(sessionId, history, summary, currentRound, userId, message);
+            }
 
-        // 步骤7: 更新短期记忆（对话历史 + extracted_info + round_intents）
-        history = updateSessionMemory(sessionId, history, message, reply, finalEntities, currentRound, intent, entities);
+            Map<String, Object> subParams = buildSubAgentParams(userId, sessionId, message, history, summary,
+                    singleIntent.getEntities());
+            AgentResult subResult = subAgent.runAsync(subParams).join();
+            subResults = List.of(subResult);
+        } else {
+            // 步骤4b: 多意图 → 委托 AgentOrchestrator（Plan & Execute）
+            primaryIntent = intentItems.get(0).getIntent();
+            Map<String, Object> subParams = buildSubAgentParams(userId, sessionId, message, history, summary,
+                    intentItems.get(0).getEntities());
+            subResults = agentOrchestrator.execute(intentItems, subParams);
+        }
 
-        // 步骤8: 异步检测重复提问
-        triggerAsyncDetection(sessionId, message, intent, entities, currentRound);
+        // 步骤5: 提取回复和合并 entities
+        String reply = aggregateReplies(subResults);
+        Map<String, Object> finalEntities = mergeAllEntities(subResults);
 
-        // 步骤9: 转人工检测
-        checkTransferToHuman(intent, sessionId, userId, currentRound);
+        // 步骤6: 更新短期记忆
+        history = updateSessionMemory(sessionId, history, message, reply, finalEntities, currentRound,
+                primaryIntent, intentItems);
 
-        // 步骤10: 记录用户行为
+        // 步骤7: 异步检测重复提问
+        triggerAsyncDetection(sessionId, message, primaryIntent, finalEntities, currentRound);
+
+        // 步骤8: 转人工检测
+        checkTransferToHuman(primaryIntent, sessionId, userId, currentRound);
+
+        // 步骤9: 记录用户行为
         recordBehavior(userId, message);
 
-        // 步骤11: 组装返回结果
-        return buildAgentResult(sessionId, reply, intent, history, summary, finalEntities, subResult);
+        // 步骤10: 组装返回结果
+        return buildAgentResult(sessionId, reply, primaryIntent, history, summary, finalEntities, subResults);
+    }
+
+    // ==================== 意图识别 ====================
+
+    /**
+     * 多意图识别
+     * LLM 从单条用户消息中识别多个意图、实体及依赖关系
+     */
+    private MultiIntentRecognitionResult recognizeIntents(String message, List<String> history, String summary) {
+        // 步骤1: 构建历史上下文
+        String historyContext = memoryService.buildHistoryContext(history, summary);
+
+        // 步骤2: 调用 LLM 识别意图
+        String prompt = String.format(
+                "分析用户意图。用户可能同时包含多个意图，请识别所有意图，分析它们之间的依赖关系。\n\n" +
+                        "意图类型：\n" +
+                        "- recommend: 用户想要推荐商品\n" +
+                        "- product_query: 用户询问某款商品\n" +
+                        "- knowledge_query: 用户问售后/物流/优惠活动等知识性问题\n" +
+                        "- compare: 用户对比商品\n" +
+                        "- chitchat: 闲聊\n" +
+                        "- transfer_to_human: 用户明确要求转人工客服\n\n" +
+                        "输出格式（JSON）：\n" +
+                        "{\"intents\":[\n" +
+                        "  {\"intent\":\"recommend\",\"entities\":{...},\"dependsOn\":[]},\n" +
+                        "  {\"intent\":\"compare\",\"entities\":{...},\"dependsOn\":[\"recommend\"]}\n" +
+                        "]}\n\n" +
+                        "说明：\n" +
+                        "- 如果只有一个意图，输出包含 1 个元素的数组\n" +
+                        "- dependsOn 表示当前意图依赖哪些意图先完成（如 compare 依赖 recommend 先获取商品列表）\n" +
+                        "- 无法分析出依赖时 dependsOn 为空数组\n\n" +
+                        "%s用户消息：%s",
+                historyContext, message
+        );
+
+        try {
+            // 步骤3: 使用 BeanOutputConverter 进行 JSON → POJO 转换
+            // 说明：不使用 .entity() 方法，因为 LLM 输出的复杂嵌套结构（如 Map<String, Object> entities）
+            // 会导致解析失败，抛出 "came as a complete surprise to me" 异常
+            BeanOutputConverter<MultiIntentRecognitionResult> converter =
+                    new BeanOutputConverter<>(MultiIntentRecognitionResult.class);
+            String response = chatClient.prompt().user(prompt).call().content();
+            log.info("ConversationAgent.recognizeIntents - LLM原始响应: {}", response);
+            MultiIntentRecognitionResult result = converter.convert(response);
+            if (result != null && !CollectionUtils.isEmpty(result.getIntents())) {
+                return result;
+            }
+            return null;
+        } catch (Exception e) {
+            log.error("ConversationAgent.recognizeIntents - 多意图识别失败", e);
+            return null;
+        }
+    }
+
+    // ==================== 分流与聚合 ====================
+
+    /**
+     * 聚合所有子Agent 的回复
+     */
+    private String aggregateReplies(List<AgentResult> subResults) {
+        if (CollectionUtils.isEmpty(subResults)) {
+            return "抱歉，无法理解您的需求，请换个方式描述。";
+        }
+
+        if (subResults.size() == 1) {
+            return extractReply(subResults.get(0));
+        }
+
+        // 多结果：拼接各子Agent 回复
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < subResults.size(); i++) {
+            AgentResult result = subResults.get(i);
+            if (result != null && result.isSuccess()) {
+                String reply = extractReply(result);
+                if (reply != null && !reply.isBlank()) {
+                    if (sb.length() > 0) {
+                        sb.append("\n\n---\n\n");
+                    }
+                    sb.append(reply);
+                }
+            }
+        }
+
+        String aggregated = sb.toString();
+        if (aggregated.isBlank()) {
+            return "抱歉，无法理解您的需求，请换个方式描述。";
+        }
+        return aggregated;
     }
 
     /**
-     * 获取当前轮次（基于 round_intents，而非滑动窗口的 history）
-     * round_intents 是累积的，每轮递增，长会话中不会被截断
+     * 合并所有子Agent 返回的 entities
      */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> mergeAllEntities(List<AgentResult> subResults) {
+        Map<String, Object> merged = new HashMap<>();
+        if (CollectionUtils.isEmpty(subResults)) {
+            return merged;
+        }
+
+        for (AgentResult result : subResults) {
+            if (result != null && result.getData() != null
+                    && result.getData().get("entities") instanceof Map) {
+                Map<String, Object> subEntities = (Map<String, Object>) result.getData().get("entities");
+                merged.putAll(subEntities);
+            }
+        }
+        return merged;
+    }
+
+    /**
+     * 构建意图识别失败时的错误结果
+     */
+    private AgentResult buildErrorResult(String sessionId, List<String> history, String summary,
+                                          int currentRound, String userId, String message) {
+        String reply = "抱歉，无法理解您的需求，请换个方式描述。";
+        Map<String, Object> finalEntities = new HashMap<>();
+
+        // 更新记忆（即使失败也记录对话）
+        history = updateSessionMemory(sessionId, history, message, reply, finalEntities, currentRound,
+                "unknown", Collections.emptyList());
+
+        triggerAsyncDetection(sessionId, message, "unknown", finalEntities, currentRound);
+        recordBehavior(userId, message);
+
+        return buildAgentResult(sessionId, reply, "unknown", history, summary, finalEntities, Collections.emptyList());
+    }
+
+    /**
+     * 构建子Agent 统一参数
+     */
+    private Map<String, Object> buildSubAgentParams(String userId, String sessionId, String message,
+                                                     List<String> history, String summary,
+                                                     Map<String, Object> entities) {
+        Map<String, Object> subParams = new HashMap<>();
+        subParams.put("userId", userId);
+        subParams.put("message", message);
+        subParams.put("sessionId", sessionId);
+        subParams.put("history", history);
+        subParams.put("summary", summary);
+        subParams.put("entities", entities);
+        return subParams;
+    }
+
+    // ==================== 记忆管理 ====================
+
     private int getCurrentRound(String sessionId) {
         ConversationSession session = conversationSessionService.getBySessionId(sessionId);
         if (session == null || session.getRoundIntents() == null) {
             return 0;
         }
-        // round_intents 存储已完成的轮次，其 size 即为下一个轮次的序号
-        // 例：[] → currentRound=0, [round0] → currentRound=1, [round0,round1] → currentRound=2
         try {
             List<Map<String, Object>> roundIntents = objectMapper.readValue(
                     session.getRoundIntents(), new TypeReference<>() {});
@@ -193,60 +327,11 @@ public class ConversationAgent extends BaseAgent {
         }
     }
 
-    /**
-     * 路由到子Agent并执行
-     */
-    private AgentResult routeAndExecute(String intent, Map<String, Object> entities,
-                                         String userId, String sessionId, String message,
-                                         List<String> history, String summary) {
-        // 步骤1: 根据意图查找子Agent
-        BaseAgent subAgent = intentRouter.get(intent);
-        if (subAgent == null) {
-            log.warn("ConversationAgent.routeAndExecute - 未识别的意图: {}, 降级为chitchat", intent);
-            subAgent = intentRouter.get("chitchat");
-        }
-
-        log.info("ConversationAgent.routeAndExecute - 路由决策 ===> intent: {} -> subAgent: {}, entityKeys: {}",
-                intent, subAgent.name,
-                entities != null ? entities.keySet() : "none");
-
-        // 步骤2: 构建子Agent参数
-        Map<String, Object> subParams = new HashMap<>();
-        subParams.put("userId", userId);
-        subParams.put("message", message);
-        subParams.put("sessionId", sessionId);
-        subParams.put("history", history);
-        subParams.put("summary", summary);
-        subParams.put("entities", entities);
-
-        // 步骤3: 调用子Agent执行
-        return subAgent.runAsync(subParams).join();
-    }
-
-    /**
-     * 合并子Agent返回的entities到当前轮识别出的entities
-     */
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> mergeSubAgentEntities(Map<String, Object> entities, AgentResult subResult) {
-        if (subResult.getData() != null && subResult.getData().get("entities") instanceof Map) {
-            Map<String, Object> subEntities = (Map<String, Object>) subResult.getData().get("entities");
-            Map<String, Object> merged = new HashMap<>(entities != null ? entities : new HashMap<>());
-            merged.putAll(subEntities);
-            return merged;
-        }
-        return entities;
-    }
-
-    /**
-     * 更新会话记忆：对话历史 + extracted_info + round_intents
-     *
-     * @return 裁剪后的对话历史
-     */
     private List<String> updateSessionMemory(String sessionId, List<String> history,
                                               String message, String reply,
                                               Map<String, Object> finalEntities,
-                                              int currentRound, String intent,
-                                              Map<String, Object> entities) {
+                                              int currentRound, String primaryIntent,
+                                              List<IntentItem> intentItems) {
         // 步骤1: 追加本轮对话
         history.add("用户: " + message);
         history.add("助手: " + reply);
@@ -259,17 +344,24 @@ public class ConversationAgent extends BaseAgent {
                 conversationSessionService.getBySessionId(sessionId),
                 history, finalEntities);
 
-        // 步骤3: 更新 round_intents（记录本轮 intent + 原始 entities）
+        // 步骤3: 构建 round_intents 数据
+        Map<String, Object> roundEntities = new HashMap<>();
+        for (IntentItem item : intentItems) {
+            if (item.getEntities() != null) {
+                roundEntities.putAll(item.getEntities());
+            }
+        }
+
+        // 步骤4: 更新 round_intents
         memoryService.updateRoundIntents(
                 conversationSessionService.getBySessionId(sessionId),
-                currentRound, intent, entities);
+                currentRound, primaryIntent, roundEntities);
 
         return history;
     }
 
-    /**
-     * 异步触发重复提问检测
-     */
+    // ==================== 辅助方法 ====================
+
     private void triggerAsyncDetection(String sessionId, String message, String intent,
                                         Map<String, Object> entities, int currentRound) {
         final String finalSessionId = sessionId;
@@ -284,9 +376,6 @@ public class ConversationAgent extends BaseAgent {
         });
     }
 
-    /**
-     * 检测是否为转人工意图，记录质量事件
-     */
     private void checkTransferToHuman(String intent, String sessionId, String userId, int currentRound) {
         if ("transfer_to_human".equals(intent)) {
             String metricValue = "{\"trigger\":\"user_request\",\"round\":" + currentRound + "}";
@@ -294,79 +383,9 @@ public class ConversationAgent extends BaseAgent {
         }
     }
 
-    /**
-     * 组装 Agent 返回结果
-     */
-    private AgentResult buildAgentResult(String sessionId, String reply, String intent,
-                                          List<String> history, String summary,
-                                          Map<String, Object> finalEntities, AgentResult subResult) {
-        Map<String, Object> resultData = new HashMap<>(subResult.getData() != null ? subResult.getData() : new HashMap<>());
-        resultData.putIfAbsent("reply", reply);
-        resultData.put("sessionId", sessionId);
-        resultData.put("intent", intent);
-        resultData.put("dialogueHistory", history);
-        resultData.put("summary", summary);
-        resultData.put("entities", finalEntities);
-
-        log.info("ConversationAgent.buildAgentResult - 处理完成, sessionId: {}, intent: {}", sessionId, intent);
-        return AgentResult.builder()
-                .agentName(name)
-                .success(subResult.isSuccess())
-                .data(resultData)
-                .confidence(subResult.getConfidence())
-                .build();
-    }
-
-    private IntentRecognitionResult recognizeIntent(String message, List<String> history, String summary) {
-        // 步骤1: 构建历史上下文
-        String historyContext = memoryService.buildHistoryContext(history, summary);
-
-        // 步骤2: 调用LLM识别意图
-        String prompt = String.format(
-                "分析用户意图。\n" +
-                        "意图说明：\n" +
-                        "- recommend: 用户想要推荐商品（如\"推荐手机\"\"适合学生的笔记本\"）\n" +
-                        "- product_query: 用户询问某款商品（如\"iPhone 16 多少钱\"\"华为 Mate 70 怎么样\"）\n" +
-                        "- knowledge_query: 用户问售后/物流/优惠活动等知识性问题\n" +
-                        "- compare: 用户对比商品（如\"iPhone 和 华为哪个好\"\"对比这两款笔记本\"\"比较一下刚才推荐的\"\"比较第1个和第2个\"）\n" +
-                        "- chitchat: 闲聊\n" +
-                        "- transfer_to_human: 用户明确要求转人工客服（如\"转人工\"\"找人工\"\"我要找客服\"）\n" +
-                        "\n" +
-                        "实体说明：\n" +
-                        "- category: 类目（如\"手机\"）\n" +
-                        "- brand: 品牌（如\"华为\"）\n" +
-                        "- price_min, price_max: 价格区间\n" +
-                        "- product_name: 单个商品名\n" +
-                        "- product_names: 商品名数组（如[\"iPhone 16\", \"华为 Mate 70\"]）\n" +
-                        "- product_ids: 商品ID数组（如果用户明确指定了商品ID）\n" +
-                        "- indices: 序号数组（当用户说\"比较第1个和第2个\"时，提取序号，如[1, 2]）\n" +
-                        "- all: 布尔值（当用户说\"比较这几个\"\"对比刚才推荐的\"等指代性语句时，设为true）\n" +
-                        "- num_items: 推荐数量\n" +
-                        "\n" +
-                        "注意：\n" +
-                        "1. 当用户说\"比较第1个和第2个\"\"对比第2个和第3个\"时，提取indices，如[1, 2]或[2, 3]\n" +
-                        "2. 当用户说\"比较这几个\"\"对比刚才推荐的\"等指代性语句时，设置all=true\n" +
-                        "3. 当用户直接说商品名时，提取到product_names中\n" +
-                        "\n" +
-                        "%s用户消息：%s",
-                historyContext, message
-        );
-
-        try {
-            IntentRecognitionResult result = chatClient.prompt().user(prompt).call().entity(IntentRecognitionResult.class);
-            if (result != null && result.getIntent() != null) {
-                return result;
-            }
-            return new IntentRecognitionResult("chitchat", new HashMap<>());
-        } catch (Exception e) {
-            log.error("ConversationAgent.recognizeIntent 意图识别失败", e);
-            return new IntentRecognitionResult("chitchat", new HashMap<>());
-        }
-    }
-
     @SuppressWarnings("unchecked")
     private String extractReply(AgentResult result) {
-        if (result.getData() != null) {
+        if (result != null && result.getData() != null) {
             Object reply = result.getData().get("reply");
             if (reply instanceof String) {
                 return (String) reply;
@@ -375,11 +394,54 @@ public class ConversationAgent extends BaseAgent {
         return "抱歉，我暂时无法处理您的请求，请稍后再试。";
     }
 
+    private AgentResult buildAgentResult(String sessionId, String reply, String intent,
+                                          List<String> history, String summary,
+                                          Map<String, Object> finalEntities,
+                                          List<AgentResult> subResults) {
+        Map<String, Object> resultData = new HashMap<>();
+        resultData.put("reply", reply);
+        resultData.put("sessionId", sessionId);
+        resultData.put("intent", intent);
+        resultData.put("dialogueHistory", history);
+        resultData.put("summary", summary);
+        resultData.put("entities", finalEntities);
+
+        // 附件子任务结果（多意图场景）
+        if (!CollectionUtils.isEmpty(subResults) && subResults.size() > 1) {
+            List<Map<String, Object>> subTasks = new ArrayList<>();
+            for (AgentResult sr : subResults) {
+                Map<String, Object> task = new HashMap<>();
+                task.put("agentName", sr.getAgentName());
+                task.put("success", sr.isSuccess());
+                task.put("latencyMs", sr.getLatencyMs());
+                if (sr.getData() != null) {
+                    task.put("reply", sr.getData().get("reply"));
+                }
+                subTasks.add(task);
+            }
+            resultData.put("subTasks", subTasks);
+        } else if (subResults != null && subResults.size() == 1) {
+            // 单结果：合并其 data 中的关键字段
+            AgentResult singleResult = subResults.get(0);
+            if (singleResult.getData() != null) {
+                resultData.putAll(singleResult.getData());
+            }
+        }
+
+        log.info("ConversationAgent.buildAgentResult - 处理完成, sessionId: {}, intent: {}", sessionId, intent);
+        return AgentResult.builder()
+                .agentName(name)
+                .success(true)
+                .data(resultData)
+                .confidence(subResults.isEmpty() ? 0.5 : subResults.get(0).getConfidence())
+                .build();
+    }
+
     private void recordBehavior(String userId, String message) {
         try {
             userBehaviorService.recordBehavior(userId, null, "chat", message, "conversation");
         } catch (Exception e) {
-            log.warn("ConversationAgent.recordBehavior 记录行为失败", e);
+            log.warn("ConversationAgent.recordBehavior - 记录行为失败", e);
         }
     }
 }
