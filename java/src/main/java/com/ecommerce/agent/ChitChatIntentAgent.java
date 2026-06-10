@@ -19,6 +19,35 @@ public class ChitChatIntentAgent extends ReActAgent {
         super("chitchat_intent", 5.0, 2);
     }
 
+    @Override
+    public com.ecommerce.model.AgentCard getAgentCard() {
+        return com.ecommerce.model.AgentCard.builder()
+                .name("chitchat_intent")
+                .description("处理闲聊对话，友好、专业地回应用户的非业务问题")
+                .capabilities(List.of(
+                        com.ecommerce.model.AgentCapability.builder()
+                                .id("chitchat")
+                                .name("闲聊对话")
+                                .description("【端到端】处理问候、感谢、闲聊等非业务相关的自然对话。无需任何前置任务")
+                                .tags(List.of("chitchat", "greeting"))
+                                .build()
+                ))
+                .inputSchema(Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "message", Map.of("type", "string", "description", "用户消息")
+                        ),
+                        "required", List.of()
+                ))
+                .outputSchema(Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "reply", Map.of("type", "string", "description", "闲聊回复")
+                        )
+                ))
+                .build();
+    }
+
     // ==================== ReActAgent 抽象方法实现 ====================
 
     @Override

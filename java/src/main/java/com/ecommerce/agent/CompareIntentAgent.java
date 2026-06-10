@@ -29,6 +29,36 @@ public class CompareIntentAgent extends ReActAgent {
         super("compare_intent", 10.0, 2);
     }
 
+    @Override
+    public com.ecommerce.model.AgentCard getAgentCard() {
+        return com.ecommerce.model.AgentCard.builder()
+                .name("compare_intent")
+                .description("对比多个商品，生成对比表格和分析建议")
+                .capabilities(List.of(
+                        com.ecommerce.model.AgentCapability.builder()
+                                .id("compare_products")
+                                .name("商品对比")
+                                .description("从多个维度对比商品。需要上游提供商品列表（通过 search_by_keyword 或 get_by_ids 获取）")
+                                .tags(List.of("compare", "product"))
+                                .build()
+                ))
+                .inputSchema(Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "products", Map.of("type", "array", "description", "待对比的商品列表"),
+                                "message", Map.of("type", "string", "description", "用户原始消息")
+                        ),
+                        "required", List.of()
+                ))
+                .outputSchema(Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "reply", Map.of("type", "string", "description", "对比分析结果")
+                        )
+                ))
+                .build();
+    }
+
     // ==================== ReActAgent 抽象方法实现 ====================
 
     @Override

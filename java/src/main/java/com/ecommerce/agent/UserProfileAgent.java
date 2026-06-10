@@ -45,6 +45,35 @@ public class UserProfileAgent extends BaseAgent {
     }
 
     @Override
+    public com.ecommerce.model.AgentCard getAgentCard() {
+        return com.ecommerce.model.AgentCard.builder()
+                .name("user_profile")
+                .description("分析用户行为数据，生成用户画像（偏好类目、价格区间、RFM分群）")
+                .capabilities(List.of(
+                        com.ecommerce.model.AgentCapability.builder()
+                                .id("get_user_profile")
+                                .name("获取用户画像")
+                                .description("【构建块】获取当前用户的画像数据。仅当多个意图需要共享同一份画像时才单独调用；recommend 内部自动获取，不需要此外部步骤")
+                                .tags(List.of("user", "profile"))
+                                .build()
+                ))
+                .inputSchema(Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "userId", Map.of("type", "string", "description", "用户ID")
+                        ),
+                        "required", List.of("userId")
+                ))
+                .outputSchema(Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "profile", Map.of("type", "object", "description", "用户画像对象")
+                        )
+                ))
+                .build();
+    }
+
+    @Override
     protected AgentResult execute(Map<String, Object> params) throws Exception {
         // 步骤1: 获取用户ID
         String userId = (String) params.get("userId");

@@ -68,6 +68,37 @@ public class RecommendIntentAgent extends ReActAgent {
         super("recommend_intent", 10.0, 2);
     }
 
+    @Override
+    public com.ecommerce.model.AgentCard getAgentCard() {
+        return com.ecommerce.model.AgentCard.builder()
+                .name("recommend_intent")
+                .description("根据用户偏好和上下文推荐商品，支持多路召回和个性化排序")
+                .capabilities(List.of(
+                        com.ecommerce.model.AgentCapability.builder()
+                                .id("recommend_products")
+                                .name("商品推荐")
+                                .description("【端到端】基于用户画像和对话上下文推荐商品。内部自动获取用户画像+搜索商品，无需前置任务")
+                                .tags(List.of("recommend", "product"))
+                                .build()
+                ))
+                .inputSchema(Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "message", Map.of("type", "string", "description", "用户推荐请求"),
+                                "category", Map.of("type", "string", "description", "商品类目")
+                        ),
+                        "required", List.of()
+                ))
+                .outputSchema(Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "products", Map.of("type", "array", "description", "推荐商品列表"),
+                                "reply", Map.of("type", "string", "description", "推荐理由")
+                        )
+                ))
+                .build();
+    }
+
     @PostConstruct
     public void init() {
         registerTool(productSearchTool);

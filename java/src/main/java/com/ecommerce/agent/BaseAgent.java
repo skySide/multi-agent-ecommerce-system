@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Base agent with retry, timeout, fallback, and metrics.
- * All four domain agents extend this class.
+ * All agents extend this class.
  */
 public abstract class BaseAgent {
 
@@ -36,6 +36,17 @@ public abstract class BaseAgent {
     }
 
     protected abstract AgentResult execute(Map<String, Object> params) throws Exception;
+
+    /**
+     * 返回 Agent Card（A2A Protocol）
+     * 声明 Agent 的能力、输入输出模式，供 AgentRegistry 注册和 LLM 能力匹配。
+     *
+     * 默认返回 null——不需要参与 A2A 编排的 Agent 无需重写。
+     * 需要被 A2AOrchestrator 调度的 Agent 必须重写此方法。
+     */
+    public com.ecommerce.model.AgentCard getAgentCard() {
+        return null;
+    }
 
     public CompletableFuture<AgentResult> runAsync(Map<String, Object> params) {
         return CompletableFuture.supplyAsync(() -> {

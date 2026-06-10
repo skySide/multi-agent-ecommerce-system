@@ -34,6 +34,35 @@ public class KnowledgeIntentAgent extends ReActAgent {
         super("knowledge_intent", 8.0, 2);
     }
 
+    @Override
+    public com.ecommerce.model.AgentCard getAgentCard() {
+        return com.ecommerce.model.AgentCard.builder()
+                .name("knowledge_intent")
+                .description("查询知识库，回答售后、物流、保修、优惠活动等政策性问题")
+                .capabilities(List.of(
+                        com.ecommerce.model.AgentCapability.builder()
+                                .id("query_knowledge")
+                                .name("知识库查询")
+                                .description("【端到端】从知识库 RAG 检索退换货政策、物流信息、保修条款等。内部自行检索，无需前置任务")
+                                .tags(List.of("knowledge", "policy", "query"))
+                                .build()
+                ))
+                .inputSchema(Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "query", Map.of("type", "string", "description", "用户查询的问题")
+                        ),
+                        "required", List.of()
+                ))
+                .outputSchema(Map.of(
+                        "type", "object",
+                        "properties", Map.of(
+                                "reply", Map.of("type", "string", "description", "知识库检索结果")
+                        )
+                ))
+                .build();
+    }
+
     // ==================== ReActAgent 抽象方法实现 ====================
 
     @Override
